@@ -787,6 +787,7 @@ func NewBootstrapPod(
 					SecurityContext: securityContext,
 				},
 			},
+			HostNetwork:        true, // CRITEO WORKAROUND
 			InitContainers:     initContainers,
 			Volumes:            volumes,
 			ServiceAccountName: cr.Spec.General.ServiceAccount,
