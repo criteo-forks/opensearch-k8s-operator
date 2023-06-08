@@ -321,20 +321,20 @@ func NewSTSForNodePool(
 				`
 				#!/usr/bin/env bash
 				set -euo pipefail
-	  
+
 				/usr/share/opensearch/bin/opensearch-keystore create
 				for i in /tmp/keystoreSecrets/*/*; do
 				  key=$(basename $i)
 				  echo "Adding file $i to keystore key $key"
 				  /usr/share/opensearch/bin/opensearch-keystore add-file "$key" "$i"
 				done
-	  
+
 				# Add the bootstrap password since otherwise the opensearch entrypoint tries to do this on startup
 				if [ ! -z ${PASSWORD+x} ]; then
 				  echo 'Adding env $PASSWORD to keystore as key bootstrap.password'
 				  echo "$PASSWORD" | /usr/share/opensearch/bin/opensearch-keystore add -x bootstrap.password
 				fi
-	  
+
 				cp -a /usr/share/opensearch/config/opensearch.keystore /tmp/keystore/
 				`,
 			},
@@ -424,6 +424,8 @@ func NewSTSForNodePool(
 							SecurityContext: securityContext,
 						},
 					},
+					HostNetwork:               true,                              // CRITEO WORKAROUND
+					DNSPolicy:                 corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
 					InitContainers:            initContainers,
 					Volumes:                   volumes,
 					ServiceAccountName:        cr.Spec.General.ServiceAccount,
@@ -787,6 +789,8 @@ func NewBootstrapPod(
 					SecurityContext: securityContext,
 				},
 			},
+			HostNetwork:        true,                              // CRITEO WORKAROUND
+			DNSPolicy:          corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
 			InitContainers:     initContainers,
 			Volumes:            volumes,
 			ServiceAccountName: cr.Spec.General.ServiceAccount,
@@ -936,6 +940,8 @@ func NewSnapshotRepoconfigUpdateJob(
 						Args:            []string{snapshotCmd},
 						VolumeMounts:    volumeMounts,
 					}},
+					HostNetwork:   true,                              // CRITEO WORKAROUND
+					DNSPolicy:     corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
 					RestartPolicy: corev1.RestartPolicyNever,
 					Volumes:       volumes,
 				},
@@ -1008,6 +1014,8 @@ func NewSecurityconfigUpdateJob(
 						Args:            []string{arg},
 						VolumeMounts:    volumeMounts,
 					}},
+					HostNetwork:      true,                              // CRITEO WORKAROUND
+					DNSPolicy:        corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
 					Volumes:          volumes,
 					RestartPolicy:    corev1.RestartPolicyNever,
 					ImagePullSecrets: image.ImagePullSecrets,
