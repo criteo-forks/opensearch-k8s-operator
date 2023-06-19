@@ -15,7 +15,11 @@ jobs:
         go-version: ${{ env.go_version }}
     - uses: actions/checkout@v2
     - name: Build
-      run: cd opensearch-operator && CGO_ENABLED=0 make --warn-undefined-variables
+      env:
+        # Use static linking for our target platform
+        GOOS: "linux"
+        GOARCH: "amd64"
+      run: cd opensearch-operator && make
     - name: Upload
       uses: fnkr/github-action-ghr@v1
       env:
