@@ -15,7 +15,7 @@ jobs:
         go-version: ${{ env.go_version }}
     - uses: actions/checkout@v2
     - name: Build
-      run: cd opensearch-operator && make --warn-undefined-variables
+      run: cd opensearch-operator && CGO_ENABLED=0 make --warn-undefined-variables
     - name: Upload
       uses: fnkr/github-action-ghr@v1
       env:
