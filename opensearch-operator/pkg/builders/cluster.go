@@ -321,20 +321,20 @@ func NewSTSForNodePool(
 				`
 				#!/usr/bin/env bash
 				set -euo pipefail
-	  
+
 				/usr/share/opensearch/bin/opensearch-keystore create
 				for i in /tmp/keystoreSecrets/*/*; do
 				  key=$(basename $i)
 				  echo "Adding file $i to keystore key $key"
 				  /usr/share/opensearch/bin/opensearch-keystore add-file "$key" "$i"
 				done
-	  
+
 				# Add the bootstrap password since otherwise the opensearch entrypoint tries to do this on startup
 				if [ ! -z ${PASSWORD+x} ]; then
 				  echo 'Adding env $PASSWORD to keystore as key bootstrap.password'
 				  echo "$PASSWORD" | /usr/share/opensearch/bin/opensearch-keystore add -x bootstrap.password
 				fi
-	  
+
 				cp -a /usr/share/opensearch/config/opensearch.keystore /tmp/keystore/
 				`,
 			},
@@ -369,8 +369,8 @@ func NewSTSForNodePool(
 						{
 							Env: []corev1.EnvVar{
 								{
-									Name:  "cluster.initial_master_nodes",
-									Value: BootstrapPodName(cr),
+									Name:      "cluster.initial_master_nodes",
+									ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"}},
 								},
 								{
 									Name:  "discovery.seed_hosts",
@@ -385,9 +385,8 @@ func NewSTSForNodePool(
 									Value: "0.0.0.0",
 								},
 								{
-									// Make elasticsearch announce its hostname instead of IP so that certificates using the hostname can be verified
 									Name:      "network.publish_host",
-									ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.name"}},
+									ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"}},
 								},
 								{
 									Name:  "OPENSEARCH_JAVA_OPTS",
@@ -424,6 +423,8 @@ func NewSTSForNodePool(
 							SecurityContext: securityContext,
 						},
 					},
+					HostNetwork:               true,                      // CRITEO WORKAROUND
+					DNSPolicy:                 "ClusterFirstWithHostNet", // CRITEO WORKAROUND
 					InitContainers:            initContainers,
 					Volumes:                   volumes,
 					ServiceAccountName:        cr.Spec.General.ServiceAccount,
@@ -689,8 +690,8 @@ func NewBootstrapPod(
 
 	env := []corev1.EnvVar{
 		{
-			Name:  "cluster.initial_master_nodes",
-			Value: BootstrapPodName(cr),
+			Name:      "cluster.initial_master_nodes",
+			ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"}},
 		},
 		{
 			Name:  "discovery.seed_hosts",
@@ -701,13 +702,16 @@ func NewBootstrapPod(
 			Value: cr.Name,
 		},
 		{
+			Name:      "node.name",
+			ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"}},
+		},
+		{
 			Name:  "network.bind_host",
 			Value: "0.0.0.0",
 		},
 		{
-			// Make elasticsearch announce its hostname instead of IP so that certificates using the hostname can be verified
 			Name:      "network.publish_host",
-			ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.name"}},
+			ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"}},
 		},
 		{
 			Name:  "OPENSEARCH_JAVA_OPTS",
@@ -787,7 +791,8 @@ func NewBootstrapPod(
 					SecurityContext: securityContext,
 				},
 			},
-			HostNetwork:        true, // CRITEO WORKAROUND
+			HostNetwork:        true,                      // CRITEO WORKAROUND
+			DNSPolicy:          "ClusterFirstWithHostNet", // CRITEO WORKAROUND
 			InitContainers:     initContainers,
 			Volumes:            volumes,
 			ServiceAccountName: cr.Spec.General.ServiceAccount,
@@ -1009,6 +1014,8 @@ func NewSecurityconfigUpdateJob(
 						Args:            []string{arg},
 						VolumeMounts:    volumeMounts,
 					}},
+					HostNetwork:      true,                      // CRITEO WORKAROUND
+					DNSPolicy:        "ClusterFirstWithHostNet", // CRITEO WORKAROUND
 					Volumes:          volumes,
 					RestartPolicy:    corev1.RestartPolicyNever,
 					ImagePullSecrets: image.ImagePullSecrets,

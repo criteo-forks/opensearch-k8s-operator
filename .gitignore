@@ -20,4 +20,6 @@ testbin/
 .vscode
 .idea/
 
+*__debug_*
+
 opensearch-operator/functionaltests/kubeconfig
