@@ -141,7 +141,9 @@ func NewDashboardsDeploymentForCR(cr *opsterv1.OpenSearchCluster, volumes []core
 					Annotations: annotations,
 				},
 				Spec: corev1.PodSpec{
-					Volumes: volumes,
+					Volumes:     volumes,
+					HostNetwork: true,                              // CRITEO WORKAROUND
+					DNSPolicy:   corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
 					Containers: []corev1.Container{
 						{
 							Name:            "dashboards",
@@ -162,11 +164,12 @@ func NewDashboardsDeploymentForCR(cr *opsterv1.OpenSearchCluster, volumes []core
 							SecurityContext: securityContext,
 						},
 					},
-					ImagePullSecrets: image.ImagePullSecrets,
-					NodeSelector:     cr.Spec.Dashboards.NodeSelector,
-					Tolerations:      cr.Spec.Dashboards.Tolerations,
-					Affinity:         cr.Spec.Dashboards.Affinity,
-					SecurityContext:  podSecurityContext,
+					ImagePullSecrets:   image.ImagePullSecrets,
+					NodeSelector:       cr.Spec.Dashboards.NodeSelector,
+					Tolerations:        cr.Spec.Dashboards.Tolerations,
+					Affinity:           cr.Spec.Dashboards.Affinity,
+					SecurityContext:    podSecurityContext,
+					ServiceAccountName: cr.Spec.General.ServiceAccount,
 				},
 			},
 		},

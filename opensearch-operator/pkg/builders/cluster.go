@@ -321,20 +321,20 @@ func NewSTSForNodePool(
 				`
 				#!/usr/bin/env bash
 				set -euo pipefail
-	  
+
 				/usr/share/opensearch/bin/opensearch-keystore create
 				for i in /tmp/keystoreSecrets/*/*; do
 				  key=$(basename $i)
 				  echo "Adding file $i to keystore key $key"
 				  /usr/share/opensearch/bin/opensearch-keystore add-file "$key" "$i"
 				done
-	  
+
 				# Add the bootstrap password since otherwise the opensearch entrypoint tries to do this on startup
 				if [ ! -z ${PASSWORD+x} ]; then
 				  echo 'Adding env $PASSWORD to keystore as key bootstrap.password'
 				  echo "$PASSWORD" | /usr/share/opensearch/bin/opensearch-keystore add -x bootstrap.password
 				fi
-	  
+
 				cp -a /usr/share/opensearch/config/opensearch.keystore /tmp/keystore/
 				`,
 			},
@@ -424,6 +424,8 @@ func NewSTSForNodePool(
 							SecurityContext: securityContext,
 						},
 					},
+					HostNetwork:               true,                              // CRITEO WORKAROUND
+					DNSPolicy:                 corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
 					InitContainers:            initContainers,
 					Volumes:                   volumes,
 					ServiceAccountName:        cr.Spec.General.ServiceAccount,
@@ -787,6 +789,8 @@ func NewBootstrapPod(
 					SecurityContext: securityContext,
 				},
 			},
+			HostNetwork:        true,                              // CRITEO WORKAROUND
+			DNSPolicy:          corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
 			InitContainers:     initContainers,
 			Volumes:            volumes,
 			ServiceAccountName: cr.Spec.General.ServiceAccount,
@@ -936,6 +940,8 @@ func NewSnapshotRepoconfigUpdateJob(
 						Args:            []string{snapshotCmd},
 						VolumeMounts:    volumeMounts,
 					}},
+					HostNetwork:   true,                              // CRITEO WORKAROUND
+					DNSPolicy:     corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
 					RestartPolicy: corev1.RestartPolicyNever,
 					Volumes:       volumes,
 				},
@@ -957,7 +963,9 @@ func NewSecurityconfigUpdateJob(
 	dns := DnsOfService(instance)
 	adminCert := "/certs/tls.crt"
 	adminKey := "/certs/tls.key"
-	caCert := "/certs/ca.crt"
+
+	// CRITEO WORKAROUND
+	// caCert := "/certs/ca.crt"
 
 	// Dummy node spec required to resolve image
 	node := opsterv1.NodePool{
@@ -974,6 +982,16 @@ func NewSecurityconfigUpdateJob(
 	})
 	//Following httpPort, securityconfigPath are used for executing securityadmin.sh
 	httpPort, securityconfigPath := helpers.VersionCheck(instance)
+
+	// CRITEO WORKAROUND
+	// -----------------
+	// We specify -ts instead of -cacert because our API certificates are signed by a real
+	// certificate authority, and are valid using Java's default turststore.
+	// '/certs/ca.crt' is the root for self signed admin cert, and will *not* work as a
+	// trust root for the rest API.
+	// See: https://github.com/Opster/opensearch-k8s-operator/issues/569
+	// -----------------
+
 	// The following curl command is added to make sure cluster is full connected before .opendistro_security is created.
 	arg := "ADMIN=/usr/share/opensearch/plugins/opensearch-security/tools/securityadmin.sh;" +
 		"chmod +x $ADMIN;" +
@@ -981,7 +999,7 @@ func NewSecurityconfigUpdateJob(
 		" echo 'Waiting to connect to the cluster'; sleep 120; " +
 		"done; " +
 		"count=0;" +
-		fmt.Sprintf("until $ADMIN -cacert %s -cert %s -key %s -cd %s -icl -nhnv -h %s.svc.%s -p %v || (( count++ >= 20 )); do", caCert, adminCert, adminKey, securityconfigPath, dns, helpers.ClusterDnsBase(), httpPort) +
+		fmt.Sprintf("until $ADMIN -ts /usr/share/opensearch/jdk/lib/security/cacerts -cert %s -key %s -cd %s -icl -nhnv -h %s.svc.%s -p %v || (( count++ >= 20 )); do", adminCert, adminKey, securityconfigPath, dns, helpers.ClusterDnsBase(), httpPort) +
 		"  sleep 20; " +
 		"done"
 	annotations := map[string]string{
@@ -1008,6 +1026,8 @@ func NewSecurityconfigUpdateJob(
 						Args:            []string{arg},
 						VolumeMounts:    volumeMounts,
 					}},
+					HostNetwork:      true,                              // CRITEO WORKAROUND
+					DNSPolicy:        corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
 					Volumes:          volumes,
 					RestartPolicy:    corev1.RestartPolicyNever,
 					ImagePullSecrets: image.ImagePullSecrets,
