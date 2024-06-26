@@ -196,9 +196,9 @@ func (r *SecurityconfigReconciler) Reconcile() (ctrl.Result, error) {
 		clusterHostName := BuildClusterSvcHostName(r.instance)
 		httpPort, securityconfigPath := helpers.VersionCheck(r.instance)
 		cmdArg = fmt.Sprintf(SecurityAdminBaseCmdTmpl, clusterHostName, httpPort) +
+			fmt.Sprintf(ApplyAllYmlCmdTmpl, adminCert, adminKey, securityconfigPath, clusterHostName, httpPort) +
 			fmt.Sprintf(ApplyDisableAutoExpandConfigurationCmdTmpl, adminCert, adminKey, securityconfigPath, clusterHostName, httpPort) +
-			fmt.Sprintf(ApplyReplicaConfigurationCmdTmpl, adminCert, adminKey, securityconfigPath, clusterHostName, httpPort) +
-			fmt.Sprintf(ApplyAllYmlCmdTmpl, adminCert, adminKey, securityconfigPath, clusterHostName, httpPort)
+			fmt.Sprintf(ApplyReplicaConfigurationCmdTmpl, adminCert, adminKey, securityconfigPath, clusterHostName, httpPort)
 	}
 
 	r.logger.Info("Starting securityconfig update job")
