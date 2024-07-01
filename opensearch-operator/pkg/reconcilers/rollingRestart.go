@@ -192,7 +192,13 @@ func (r *RollingRestartReconciler) restartStatefulSetPod(sts *appsv1.StatefulSet
 		return ctrl.Result{}, err
 	}
 
-	ready, err = services.PreparePodForDelete(r.osClient, workingPod, r.instance.Spec.General.DrainDataNodes, dataCount)
+	// CRITEO WORKAROUND: use node ip
+	podIp, err := helpers.ReplicaHostIpByPodName(r.ctx, r.Client, *sts, workingPod)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	ready, err = services.PreparePodForDeleteByIp(r.osClient, podIp, r.instance.Spec.General.DrainDataNodes, dataCount)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -219,8 +225,9 @@ func (r *RollingRestartReconciler) restartStatefulSetPod(sts *appsv1.StatefulSet
 	}
 
 	// If we are draining nodes remove the exclusion after the pod is deleted
+	// CRITEO WORKAROUND: use node ip
 	if r.instance.Spec.General.DrainDataNodes {
-		_, err = services.RemoveExcludeNodeHost(r.osClient, workingPod)
+		_, err = services.RemoveExcludeNodeHostIp(r.osClient, podIp)
 		return ctrl.Result{}, err
 	}
 

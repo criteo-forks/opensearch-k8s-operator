@@ -374,7 +374,15 @@ func (r *UpgradeReconciler) doNodePoolUpgrade(pool opsterv1.NodePool) error {
 		return err
 	}
 
-	ready, err = services.PreparePodForDelete(r.osClient, workingPod, r.instance.Spec.General.DrainDataNodes, dataCount)
+	// CRITEO WORKAROUND: use node ip
+	podIp, err := helpers.ReplicaHostIpByPodName(r.ctx, r.Client, *sts, workingPod)
+	if err != nil {
+		conditions = append(conditions, fmt.Sprintf("Failed to resolve IP for pod %s on %s", workingPod, pool.Component))
+		r.setComponentConditions(conditions, pool.Component)
+		return err
+	}
+
+	ready, err = services.PreparePodForDeleteByIp(r.osClient, podIp, r.instance.Spec.General.DrainDataNodes, dataCount)
 	if err != nil {
 		conditions = append(conditions, "Could not prepare pod for delete")
 		r.setComponentConditions(conditions, pool.Component)
@@ -406,8 +414,9 @@ func (r *UpgradeReconciler) doNodePoolUpgrade(pool opsterv1.NodePool) error {
 	r.setComponentConditions(conditions, pool.Component)
 
 	// If we are draining nodes remove the exclusion after the pod is deleted
+	// CRITEO WORKAROUND: use node ip
 	if r.instance.Spec.General.DrainDataNodes {
-		_, err = services.RemoveExcludeNodeHost(r.osClient, workingPod)
+		_, err = services.RemoveExcludeNodeHostIp(r.osClient, podIp)
 		return err
 	}
 

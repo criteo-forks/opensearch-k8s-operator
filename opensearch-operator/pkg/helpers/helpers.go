@@ -428,6 +428,26 @@ func ReplicaHostName(currentSts appsv1.StatefulSet, repNum int32) string {
 	return fmt.Sprintf("%s-%d", currentSts.ObjectMeta.Name, repNum)
 }
 
+// CRITEO workaround
+func ReplicaHostIpByPodName(ctx context.Context, k8sClient client.Client, currentSts appsv1.StatefulSet, podName string) (string, error) {
+	pod := &corev1.Pod{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: podName, Namespace: currentSts.Namespace}, pod); err != nil {
+		return "", err
+	}
+
+	if pod.Status.PodIP == "" {
+		// Handle pending pod
+		return "", fmt.Errorf("tried to get IP of pod %s while it is pending", podName)
+	}
+
+	return pod.Status.PodIP, nil
+}
+
+// CRITEO workaround
+func ReplicaHostIp(ctx context.Context, k8sClient client.Client, currentSts appsv1.StatefulSet, repNum int32) (string, error) {
+	return ReplicaHostIpByPodName(ctx, k8sClient, currentSts, ReplicaHostName(currentSts, repNum))
+}
+
 func WorkingPodForRollingRestart(ctx context.Context, k8sClient client.Client, sts *appsv1.StatefulSet) (string, error) {
 	replicas := lo.FromPtrOr(sts.Spec.Replicas, 1)
 	// Handle the simple case
