@@ -9,6 +9,9 @@ import (
 
 var ClusterSettingsExcludeBrokenPath = []string{"cluster", "routing", "allocation", "exclude", "_name"}
 
+// CRITEO WORKAROUND: use node ip
+var ClusterSettingsExcludeBrokenPathIp = []string{"cluster", "routing", "allocation", "exclude", "_ip"}
+
 type ClusterSettingsAllocation string
 
 const (
@@ -44,6 +47,21 @@ func HasShardsOnNode(service *OsClusterClient, nodeName string) (bool, error) {
 	return false, err
 }
 
+// CRITEO WORKAROUND: use node ip
+func HasShardsOnNodeIp(service *OsClusterClient, ip string) (bool, error) {
+	var headers []string
+	response, err := service.CatShards(headers)
+	if err != nil {
+		return false, err
+	}
+	for _, shardsData := range response {
+		if shardsData.Ip == ip {
+			return true, err
+		}
+	}
+	return false, err
+}
+
 func HasIndexPrimariesOnNode(service *OsClusterClient, nodeName string, indices []string) (bool, error) {
 	var headers []string
 	response, err := service.CatNamedIndicesShards(headers, indices)
@@ -57,6 +75,26 @@ func HasIndexPrimariesOnNode(service *OsClusterClient, nodeName string, indices 
 		}
 		// If there are system shards on the node consider it not empty
 		if shardsData.NodeName == nodeName && shardsData.PrimaryOrReplica == "p" {
+			return true, nil
+		}
+	}
+	return false, err
+}
+
+// CRITEO WORKAROUND: use node ip
+func HasIndexPrimariesOnNodeIp(service *OsClusterClient, ip string, indices []string) (bool, error) {
+	var headers []string
+	response, err := service.CatNamedIndicesShards(headers, indices)
+	if err != nil {
+		return false, err
+	}
+	for _, shardsData := range response {
+		// If primary shards are still initializing consider the node not empty
+		if shardsData.PrimaryOrReplica == "p" && shardsData.State != "STARTED" {
+			return true, nil
+		}
+		// If there are system shards on the node consider it not empty
+		if shardsData.Ip == ip && shardsData.PrimaryOrReplica == "p" {
 			return true, nil
 		}
 	}
@@ -111,6 +149,56 @@ func RemoveExcludeNodeHost(service *OsClusterClient, nodeNameToExclude string) (
 	return err == nil, err
 }
 
+// CRITEO WORKAROUND: use node ip
+func AppendExcludeNodeHostIp(service *OsClusterClient, ipToExclude string) (bool, error) {
+	response, err := service.GetClusterSettings()
+	if err != nil {
+		return false, err
+	}
+	val, ok := helpers.FindByPath(response.Transient, ClusterSettingsExcludeBrokenPathIp)
+	var valAsString = ipToExclude
+	if ok && val != "" {
+		// Test whether name is already excluded
+		var found bool
+		valArr := strings.Split(val.(string), ",")
+		for _, name := range valArr {
+			if name == ipToExclude {
+				found = true
+				break
+			}
+		}
+		if !found {
+			valArr = append(valArr, ipToExclude)
+		}
+
+		valAsString = strings.Join(valArr, ",")
+	}
+	settings := createClusterSettingsResponseWithExcludeIp(valAsString)
+	if err == nil {
+		_, err = service.PutClusterSettings(settings)
+	}
+	return err == nil, err
+}
+
+// CRITEO WORKAROUND: use node ip
+func RemoveExcludeNodeHostIp(service *OsClusterClient, ipToExclude string) (bool, error) {
+	response, err := service.GetClusterSettings()
+	if err != nil {
+		return false, err
+	}
+	val, ok := helpers.FindByPath(response.Transient, ClusterSettingsExcludeBrokenPathIp)
+	if !ok || val == "" {
+		return true, err
+	}
+	valAsString := strings.ReplaceAll(val.(string), ipToExclude, "")
+	valAsString = strings.ReplaceAll(valAsString, ",,", ",")
+	settings := createClusterSettingsResponseWithExcludeIp(valAsString)
+	if err == nil {
+		_, err = service.PutClusterSettings(settings)
+	}
+	return err == nil, err
+}
+
 func SetClusterShardAllocation(service *OsClusterClient, enableType ClusterSettingsAllocation) error {
 	settings := createClusterSettingsAllocationEnable(enableType)
 	_, err := service.PutClusterSettings(settings)
@@ -128,6 +216,25 @@ func createClusterSettingsResponseWithExcludeName(exclude string) responses.Clus
 				"allocation": map[string]interface{}{
 					"exclude": map[string]interface{}{
 						"_name": val,
+					},
+				},
+			},
+		},
+	}}
+}
+
+// CRITEO WORKAROUND: use node ip
+func createClusterSettingsResponseWithExcludeIp(exclude string) responses.ClusterSettingsResponse {
+	var val *string = nil
+	if exclude != "" {
+		val = &exclude
+	}
+	return responses.ClusterSettingsResponse{Transient: map[string]interface{}{
+		"cluster": map[string]interface{}{
+			"routing": map[string]interface{}{
+				"allocation": map[string]interface{}{
+					"exclude": map[string]interface{}{
+						"_ip": val,
 					},
 				},
 			},
@@ -221,6 +328,44 @@ func PreparePodForDelete(service *OsClusterClient, podName string, drainNode boo
 
 		// Check if there are any shards on the node
 		nodeNotEmpty, err := HasShardsOnNode(service, podName)
+		if err != nil {
+			return false, err
+		}
+		// If the node isn't empty requeue to wait for shards to drain
+		return !nodeNotEmpty, nil
+	}
+	// Update cluster routing before deleting appropriate ordinal pod
+	if err := SetClusterShardAllocation(service, ClusterSettingsAllocationPrimaries); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// CRITEO WORKAROUND: use node ip
+func PreparePodForDeleteByIp(service *OsClusterClient, podIp string, drainNode bool, nodeCount int32) (bool, error) {
+	if drainNode {
+		// If we are draining nodes then drain the working node
+		_, err := AppendExcludeNodeHostIp(service, podIp)
+		if err != nil {
+			return false, err
+		}
+
+		// If there are only 2 data nodes only check for system indics
+		if nodeCount == 2 {
+			systemIndices, err := GetExistingSystemIndices(service)
+			if err != nil {
+				return false, err
+			}
+
+			systemPrimaries, err := HasIndexPrimariesOnNodeIp(service, podIp, systemIndices)
+			if err != nil {
+				return false, err
+			}
+			return !systemPrimaries, nil
+		}
+
+		// Check if there are any shards on the node
+		nodeNotEmpty, err := HasShardsOnNodeIp(service, podIp)
 		if err != nil {
 			return false, err
 		}
