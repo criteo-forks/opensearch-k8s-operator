@@ -27,6 +27,20 @@ func newTLSReconciler(spec *opsterv1.OpenSearchCluster) (*ReconcilerContext, *TL
 	return &reconcilerContext, underTest
 }
 
+// CRITEO: do not mock PKI for transport cert renewal test. Could consider modifying newTLSReconciler instead,
+// as tests already in upstream pass with the real pki module too.
+func newTLSReconcilerWithRealPKI(spec *opsterv1.OpenSearchCluster) (*ReconcilerContext, *TLSReconciler) {
+	reconcilerContext := NewReconcilerContext(&helpers.MockEventRecorder{}, spec, spec.Spec.NodePools)
+	underTest := NewTLSReconciler(
+		k8sClient,
+		context.Background(),
+		&reconcilerContext,
+		spec,
+	)
+	//underTest.pki = helpers.NewMockPKI()
+	return &reconcilerContext, underTest
+}
+
 var _ = Describe("TLS Controller", func() {
 
 	// Define utility constants for object names and testing timeouts/durations and intervals.
@@ -86,6 +100,48 @@ var _ = Describe("TLS Controller", func() {
 				return err == nil
 			}, timeout, interval).Should(BeTrue())
 
+		})
+	})
+
+	// CRITEO
+	Context("When Reconciling the TLS configuration with no existing secrets (transport cert renewal test)", func() {
+		It("should create the needed secrets and only regen close to expiration", func() {
+			clusterName := "tls-test2"
+			transportSecretName := clusterName + "-transport-cert"
+			spec := opsterv1.OpenSearchCluster{
+				ObjectMeta: metav1.ObjectMeta{Name: clusterName, Namespace: clusterName, UID: "dummyuid"},
+				Spec: opsterv1.ClusterSpec{
+					General: opsterv1.GeneralConfig{},
+					Security: &opsterv1.Security{Tls: &opsterv1.TlsConfig{
+						Transport: &opsterv1.TlsConfigTransport{Generate: true},
+						Http:      &opsterv1.TlsConfigHttp{Generate: true},
+					}},
+				}}
+			Expect(CreateNamespace(k8sClient, clusterName)).Should(Succeed())
+			_, underTest := newTLSReconcilerWithRealPKI(&spec)
+			_, err := underTest.Reconcile()
+			Expect(err).ToNot(HaveOccurred())
+
+			transportSecret1 := corev1.Secret{}
+			err = k8sClient.Get(context.Background(), client.ObjectKey{Name: transportSecretName, Namespace: clusterName}, &transportSecret1)
+			Expect(err).ToNot(HaveOccurred())
+
+			_, err = underTest.Reconcile()
+			Expect(err).ToNot(HaveOccurred())
+
+			transportSecret2 := corev1.Secret{}
+			err = k8sClient.Get(context.Background(), client.ObjectKey{Name: transportSecretName, Namespace: clusterName}, &transportSecret2)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(transportSecret1.ObjectMeta.ResourceVersion).To(Equal(transportSecret2.ObjectMeta.ResourceVersion))
+
+			underTest.transportCertDeadlineDays = 730
+			_, err = underTest.Reconcile()
+			Expect(err).ToNot(HaveOccurred())
+
+			transportSecret3 := corev1.Secret{}
+			err = k8sClient.Get(context.Background(), client.ObjectKey{Name: transportSecretName, Namespace: clusterName}, &transportSecret3)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(transportSecret1.ObjectMeta.ResourceVersion).ToNot(Equal(transportSecret3.ObjectMeta.ResourceVersion))
 		})
 	})
 
