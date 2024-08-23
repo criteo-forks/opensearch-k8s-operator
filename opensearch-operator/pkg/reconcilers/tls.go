@@ -29,12 +29,13 @@ import (
 type TLSReconciler struct {
 	reconciler.ResourceReconciler
 	client.Client
-	ctx               context.Context
-	reconcilerContext *ReconcilerContext
-	instance          *opsterv1.OpenSearchCluster
-	logger            logr.Logger
-	pki               tls.PKI
-	recorder          record.EventRecorder
+	ctx                       context.Context
+	reconcilerContext         *ReconcilerContext
+	instance                  *opsterv1.OpenSearchCluster
+	logger                    logr.Logger
+	pki                       tls.PKI
+	recorder                  record.EventRecorder
+	transportCertDeadlineDays int
 }
 
 func NewTLSReconciler(
@@ -48,11 +49,12 @@ func NewTLSReconciler(
 		Client: client,
 		ResourceReconciler: reconciler.NewReconcilerWith(client,
 			append(opts, reconciler.WithLog(log.FromContext(ctx).WithValues("reconciler", "tls")))...),
-		ctx:               ctx,
-		reconcilerContext: reconcilerContext,
-		instance:          instance,
-		logger:            log.FromContext(ctx),
-		pki:               tls.NewPKI(),
+		ctx:                       ctx,
+		reconcilerContext:         reconcilerContext,
+		instance:                  instance,
+		logger:                    log.FromContext(ctx),
+		pki:                       tls.NewPKI(),
+		transportCertDeadlineDays: 30,
 	}
 }
 
@@ -179,15 +181,15 @@ func (r *TLSReconciler) getCACert() (tls.Cert, error) {
 	return util.ReadOrGenerateCaCert(r.pki, r.Client, r.ctx, r.instance)
 }
 
-func (r *TLSReconciler) shouldCreateAdminCert(ca tls.Cert) (bool, error) {
+func (r *TLSReconciler) shouldCreateClusterCert(ca tls.Cert, secretName string, deadline time.Duration) (bool, error) {
 	secret := &corev1.Secret{}
 	err := r.Get(r.ctx, types.NamespacedName{
-		Name:      r.adminSecretName(),
+		Name:      secretName,
 		Namespace: r.instance.Namespace,
 	}, secret)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
-			r.logger.Info("admin cert does not exist, creating")
+			r.logger.Info(fmt.Sprintf("%s cert does not exist, creating", secretName))
 			return true, nil
 		}
 		return false, err
@@ -198,13 +200,13 @@ func (r *TLSReconciler) shouldCreateAdminCert(ca tls.Cert) (bool, error) {
 		return true, nil
 	}
 
-	validator, err := tls.NewCertValidater(data, tls.WithExpiryThreshold(5*24*time.Hour))
+	validator, err := tls.NewCertValidater(data, tls.WithExpiryThreshold(deadline))
 	if err != nil {
 		return false, err
 	}
 
 	if validator.IsExpiringSoon() {
-		r.logger.Info("admin cert is expiring soon, recreating")
+		r.logger.Info(fmt.Sprintf("%s cert is expiring soon, recreating", secretName))
 		return true, nil
 	}
 
@@ -214,14 +216,14 @@ func (r *TLSReconciler) shouldCreateAdminCert(ca tls.Cert) (bool, error) {
 	}
 
 	if !verified {
-		r.logger.Info("admin cert is not signed by CA, recreating")
+		r.logger.Info(fmt.Sprintf("%s cert is not signed by CA, recreating", secretName))
 	}
 
 	return !verified, nil
 }
 
 func (r *TLSReconciler) createAdminSecret(ca tls.Cert) (*ctrl.Result, error) {
-	createCert, err := r.shouldCreateAdminCert(ca)
+	createCert, err := r.shouldCreateClusterCert(ca, r.adminSecretName(), 5*24*time.Hour)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine if admin cert should be created: %w", err)
 	}
@@ -280,7 +282,13 @@ func (r *TLSReconciler) handleTransportGenerateGlobal() error {
 
 	// Generate node cert, sign it and put it into secret
 	nodeSecret := corev1.Secret{}
-	if err := r.Get(r.ctx, client.ObjectKey{Name: nodeSecretName, Namespace: namespace}, &nodeSecret); err != nil {
+	createCert, err := r.shouldCreateClusterCert(ca, nodeSecretName, time.Duration(r.transportCertDeadlineDays)*24*time.Hour)
+	if err != nil {
+		r.logger.Error(err, "Failed to determine whether to recreate global transport cert", "interface", "transport")
+		return err
+	}
+
+	if createCert {
 		// Generate node cert and put it into secret
 		dnsNames := []string{
 			clusterName,
@@ -297,9 +305,11 @@ func (r *TLSReconciler) handleTransportGenerateGlobal() error {
 		if err := ctrl.SetControllerReference(r.instance, &nodeSecret, r.Client.Scheme()); err != nil {
 			return err
 		}
-		if err := r.Create(r.ctx, &nodeSecret); err != nil {
+		if _, err := r.ReconcileResource(&nodeSecret, reconciler.StatePresent); err != nil {
 			r.logger.Error(err, "Failed to store node certificate in secret", "interface", "transport")
 			return err
+		} else {
+			r.logger.Info("Generated new global transport certificate", "interface", "transport")
 		}
 	}
 	// Tell cluster controller to mount secrets
