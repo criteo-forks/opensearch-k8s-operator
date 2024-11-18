@@ -69,10 +69,10 @@ func (r *RollingRestartReconciler) Reconcile() (ctrl.Result, error) {
 
 	status := r.findStatus()
 	var pendingUpdate bool
-	// Check that all data nodes are ready before doing work
+	// Check that all data and master nodes are ready before doing work
 	// Also check if there are pending updates
 	for _, nodePool := range r.instance.Spec.NodePools {
-		if helpers.HasDataRole(&nodePool) {
+		if helpers.HasDataRole(&nodePool) || helpers.HasManagerRole(&nodePool) {
 			sts := &appsv1.StatefulSet{}
 			if err := r.Get(r.ctx, types.NamespacedName{
 				Name:      builders.StsName(r.instance, &nodePool),
@@ -81,7 +81,7 @@ func (r *RollingRestartReconciler) Reconcile() (ctrl.Result, error) {
 				return ctrl.Result{}, err
 			}
 			// CRITEO: sts.Status.ReadyReplicas can be inconsistent. CountRunningPodsForNodePool is more reliable
-			// as it uses listing of pods. It helps avoiding race conditions.
+			// as it uses listing of pods. It helps to avoid race conditions.
 			if numReadyPods, err := helpers.CountRunningPodsForNodePool(r.ctx, r.Client, r.instance, &nodePool); err == nil {
 				expectedReplicas := int(pointer.Int32Deref(sts.Spec.Replicas, 1))
 				if numReadyPods != expectedReplicas {
