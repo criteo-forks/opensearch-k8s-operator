@@ -310,8 +310,8 @@ func (r *ScalerReconciler) drainNode(currentStatus opsterv1.ComponentStatus, cur
 	}
 
 	// CRITEO WORKAROUND: Wait for cluster to be green
-	clusterNotGreen, _, err := services.IsClusterGreen(clusterClient)
-	if clusterNotGreen {
+	clusterGreen, _, err := services.IsClusterGreen(clusterClient)
+	if !clusterGreen {
 		lg.Info(fmt.Sprintf("Group-%s . draining node %s (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp))
 		return err
 	}
@@ -411,13 +411,13 @@ func (r *ScalerReconciler) removeStatefulSet(sts appsv1.StatefulSet) (*ctrl.Resu
 	}
 
 	// CRITEO WORKAROUND: Wait for cluster to be green
-	clusterNotGreen, msg, err := services.IsClusterGreen(clusterClient)
+	clusterGreen, msg, err := services.IsClusterGreen(clusterClient)
 	if err != nil {
 		lg.Error(err, msg)
 		return nil, err
 	}
 
-	if clusterNotGreen {
+	if !clusterGreen {
 		return &ctrl.Result{
 			Requeue:      true,
 			RequeueAfter: 15 * time.Second,
