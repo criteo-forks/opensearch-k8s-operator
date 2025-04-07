@@ -138,6 +138,7 @@ func (r *ScalerReconciler) reconcileNodePool(nodePool *opsterv1.NodePool) (bool,
 		err := r.drainNode(currentStatus, currentSts, nodePool.Component)
 		return true, err
 	}
+
 	if currentStatus.Status == "Drained" {
 		r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Scaler", "Start to Drain %s/%s", r.instance.Namespace, r.instance.Name)
 
@@ -301,11 +302,20 @@ func (r *ScalerReconciler) drainNode(currentStatus opsterv1.ComponentStatus, cur
 	if err != nil {
 		return err
 	}
+
 	nodeNotEmpty, err := services.HasShardsOnNodeIp(clusterClient, podIp)
 	if nodeNotEmpty {
 		lg.Info(fmt.Sprintf("Group-%s . draining node %s (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp))
 		return err
 	}
+
+	// CRITEO WORKAROUND: Wait for cluster to be green
+	clusterNotGreen, _, err := services.IsClusterGreen(clusterClient)
+	if clusterNotGreen {
+		lg.Info(fmt.Sprintf("Group-%s . draining node %s (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp))
+		return err
+	}
+
 	success, err := services.RemoveExcludeNodeHostIp(clusterClient, podIp)
 	if !success {
 		r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Scaler", "Group-%s . node %s node is empty but node is still excluded from allocation (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp)
@@ -333,7 +343,8 @@ func (r *ScalerReconciler) cleanupStatefulSets(result *reconciler.CombinedResult
 	if err := r.Client.List(
 		r.ctx,
 		stsList,
-		client.InNamespace(r.instance.Name),
+		// CRITEO WORKAROUND: use "Namespace" instead of "Name"
+		client.InNamespace(r.instance.Namespace),
 		client.MatchingLabels{helpers.ClusterLabel: r.instance.Name},
 	); err != nil {
 		result.Combine(&ctrl.Result{}, err)
@@ -398,6 +409,21 @@ func (r *ScalerReconciler) removeStatefulSet(sts appsv1.StatefulSet) (*ctrl.Resu
 			RequeueAfter: 15 * time.Second,
 		}, nil
 	}
+
+	// CRITEO WORKAROUND: Wait for cluster to be green
+	clusterNotGreen, msg, err := services.IsClusterGreen(clusterClient)
+	if err != nil {
+		lg.Error(err, msg)
+		return nil, err
+	}
+
+	if clusterNotGreen {
+		return &ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: 15 * time.Second,
+		}, nil
+	}
+	// END OF CRITEO WORKAROUND
 
 	if workingOrdinal == 0 {
 		result, err := r.ReconcileResource(&sts, reconciler.StateAbsent)

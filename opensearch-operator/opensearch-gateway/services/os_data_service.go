@@ -289,6 +289,20 @@ func CheckClusterStatusForRestart(service *OsClusterClient, drainNodes bool) (bo
 	return false, "enabled shard allocation", nil
 }
 
+// CRITEO WORKAROUND: check Green cluster status for Scaler
+func IsClusterGreen(service *OsClusterClient) (bool, string, error) {
+	health, err := service.GetHealth()
+	if err != nil {
+		return false, "failed to fetch health", err
+	}
+
+	if health.Status == "green" {
+		return true, "", nil
+	}
+
+	return false, "cluster not green", nil
+}
+
 func ReactivateShardAllocation(service *OsClusterClient) error {
 	flatSettings, err := service.GetFlatClusterSettings()
 	if err != nil {
