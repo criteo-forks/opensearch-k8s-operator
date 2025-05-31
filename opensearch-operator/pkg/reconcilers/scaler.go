@@ -169,23 +169,14 @@ func (r *ScalerReconciler) decreaseOneNode(currentStatus opsterv1.ComponentStatu
 	*currentSts.Spec.Replicas--
 	annotations := map[string]string{"cluster-name": r.instance.GetName()}
 	lastReplicaNodeName := helpers.ReplicaHostName(currentSts, *currentSts.Spec.Replicas)
-
-	// CRITEO WORKAROUND: use node ip
-	podIp, err := helpers.ReplicaHostIp(r.ctx, r.Client, currentSts, *currentSts.Spec.Replicas)
-
+	r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Scaler", "Start to decreaseing node %s on %s ", lastReplicaNodeName, nodePoolGroupName)
+	_, err := r.ReconcileResource(&currentSts, reconciler.StatePresent)
 	if err != nil {
-		lg.Error(err, "Failed to resolve IP for pod %s on %s", lastReplicaNodeName, nodePoolGroupName)
-		return false, err
-	}
-
-	r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Scaler", "Start to decreasing node %s on %s (IP: %s)", lastReplicaNodeName, nodePoolGroupName, podIp)
-	_, err = r.ReconcileResource(&currentSts, reconciler.StatePresent)
-	if err != nil {
-		r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Scaler", "Failed to remove node - Group-%s . Failed to remove node %s (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp)
-		lg.Error(err, fmt.Sprintf("failed to remove node %s (IP: %s)", lastReplicaNodeName, podIp))
+		r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Scaler", "Failed to remove node - Group-%s . Failed to remove node %s", nodePoolGroupName, lastReplicaNodeName)
+		lg.Error(err, fmt.Sprintf("failed to remove node %s", lastReplicaNodeName))
 		return true, err
 	}
-	lg.Info(fmt.Sprintf("Group-%s . removed node %s (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp))
+	lg.Info(fmt.Sprintf("Group-%s . removed node %s", nodePoolGroupName, lastReplicaNodeName))
 	r.instance.Status.ComponentsStatus = helpers.RemoveIt(currentStatus, r.instance.Status.ComponentsStatus)
 	err = r.Status().Update(r.ctx, r.instance)
 	if err != nil {
@@ -203,14 +194,14 @@ func (r *ScalerReconciler) decreaseOneNode(currentStatus opsterv1.ComponentStatu
 	clusterClient, err := services.NewOsClusterClient(builders.URLForCluster(r.instance), username, password)
 	if err != nil {
 		lg.Error(err, "failed to create os client")
-		r.recorder.AnnotatedEventf(r.instance, annotations, "WARN", "failed to remove node exclude", "Group-%s . failed to remove node exclude %s (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp)
+		r.recorder.AnnotatedEventf(r.instance, annotations, "WARN", "failed to remove node exclude", "Group-%s . failed to remove node exclude %s", nodePoolGroupName, lastReplicaNodeName)
 		return true, err
 	}
 
-	success, err := services.RemoveExcludeNodeHostIp(clusterClient, podIp)
+	success, err := services.RemoveExcludeNodeHost(clusterClient, lastReplicaNodeName)
 	if !success || err != nil {
-		lg.Error(err, fmt.Sprintf("failed to remove exclude node %s (IP %s)", lastReplicaNodeName, podIp))
-		r.recorder.AnnotatedEventf(r.instance, annotations, "Warning", "Scaler", "Failed to remove node exclude - Group-%s , node  %s (IP %s)", nodePoolGroupName, lastReplicaNodeName, podIp)
+		lg.Error(err, fmt.Sprintf("failed to remove exclude node %s", lastReplicaNodeName))
+		r.recorder.AnnotatedEventf(r.instance, annotations, "Warning", "Scaler", "Failed to remove node exclude - Group-%s , node  %s", nodePoolGroupName, lastReplicaNodeName)
 	}
 
 	return false, err
@@ -233,16 +224,9 @@ func (r *ScalerReconciler) excludeNode(currentStatus opsterv1.ComponentStatus, c
 	// -----  Now start remove node ------
 	lastReplicaNodeName := helpers.ReplicaHostName(currentSts, *currentSts.Spec.Replicas-1)
 
-	// CRITEO WORKAROUND: use node ip
-	podIp, err := helpers.ReplicaHostIp(r.ctx, r.Client, currentSts, *currentSts.Spec.Replicas-1)
+	excluded, err := services.AppendExcludeNodeHost(clusterClient, lastReplicaNodeName)
 	if err != nil {
-		lg.Error(err, "Failed to resolve IP for pod %s on %s", lastReplicaNodeName, nodePoolGroupName)
-		return err
-	}
-
-	excluded, err := services.AppendExcludeNodeHostIp(clusterClient, podIp)
-	if err != nil {
-		lg.Error(err, fmt.Sprintf("failed to exclude node %s (IP: %s)", lastReplicaNodeName, podIp))
+		lg.Error(err, fmt.Sprintf("failed to exclude node %s", lastReplicaNodeName))
 		return err
 	}
 	if excluded {
@@ -252,7 +236,7 @@ func (r *ScalerReconciler) excludeNode(currentStatus opsterv1.ComponentStatus, c
 			Description: nodePoolGroupName,
 		}
 		r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Scaler", "Finished to Exclude %s/%s", r.instance.Namespace, r.instance.Name)
-		lg.Info(fmt.Sprintf("Group-%s .excluded node %s (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp))
+		lg.Info(fmt.Sprintf("Group-%s .excluded node %s", nodePoolGroupName, lastReplicaNodeName))
 		r.instance.Status.ComponentsStatus = helpers.Replace(currentStatus, componentStatus, r.instance.Status.ComponentsStatus)
 		err = r.Status().Update(r.ctx, r.instance)
 		if err != nil {
@@ -270,11 +254,11 @@ func (r *ScalerReconciler) excludeNode(currentStatus opsterv1.ComponentStatus, c
 		Description: nodePoolGroupName,
 	}
 	r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Scaler", "Start sacle %s/%s from %d to %d", r.instance.Namespace, r.instance.Name, *currentSts.Spec.Replicas, *currentSts.Spec.Replicas-1)
-	lg.Info(fmt.Sprintf("Group-%s . Failed to exclude node %s (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp))
+	lg.Info(fmt.Sprintf("Group-%s . Failed to exclude node %s", nodePoolGroupName, lastReplicaNodeName))
 	r.instance.Status.ComponentsStatus = helpers.Replace(currentStatus, componentStatus, r.instance.Status.ComponentsStatus)
 	err = r.Status().Update(r.ctx, r.instance)
 	if err != nil {
-		r.recorder.AnnotatedEventf(r.instance, annotations, "Warning", "Scaler", "Group-%s . failed to remove node exclude %s (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp)
+		r.recorder.AnnotatedEventf(r.instance, annotations, "Warning", "Scaler", "Group-%s . failed to remove node exclude %s", nodePoolGroupName, lastReplicaNodeName)
 		lg.Error(err, "failed to update status")
 		return err
 	}
@@ -291,34 +275,26 @@ func (r *ScalerReconciler) drainNode(currentStatus opsterv1.ComponentStatus, cur
 		return err
 	}
 
-	// CRITEO WORKAROUND: use node ip
-	podIp, err := helpers.ReplicaHostIp(r.ctx, r.Client, currentSts, *currentSts.Spec.Replicas-1)
-	if err != nil {
-		lg.Error(err, "Failed to resolve IP for pod %s on %s", lastReplicaNodeName, nodePoolGroupName)
-		return err
-	}
-
 	clusterClient, err := services.NewOsClusterClient(builders.URLForCluster(r.instance), username, password)
 	if err != nil {
 		return err
 	}
-
-	nodeNotEmpty, err := services.HasShardsOnNodeIp(clusterClient, podIp)
+	nodeNotEmpty, err := services.HasShardsOnNode(clusterClient, lastReplicaNodeName)
 	if nodeNotEmpty {
-		lg.Info(fmt.Sprintf("Group-%s . draining node %s (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp))
+		lg.Info(fmt.Sprintf("Group-%s . draining node %s", nodePoolGroupName, lastReplicaNodeName))
 		return err
 	}
 
 	// CRITEO WORKAROUND: Wait for cluster to be green
 	clusterGreen, _, err := services.IsClusterGreen(clusterClient)
 	if !clusterGreen {
-		lg.Info(fmt.Sprintf("Group-%s . draining node %s (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp))
+		lg.Info(fmt.Sprintf("Group-%s . draining node %s", nodePoolGroupName, lastReplicaNodeName))
 		return err
 	}
 
-	success, err := services.RemoveExcludeNodeHostIp(clusterClient, podIp)
+	success, err := services.RemoveExcludeNodeHost(clusterClient, lastReplicaNodeName)
 	if !success {
-		r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Scaler", "Group-%s . node %s node is empty but node is still excluded from allocation (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp)
+		r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Scaler", "Group-%s . node %s node is empty but node is still excluded from allocation", nodePoolGroupName, lastReplicaNodeName)
 		return err
 	}
 
@@ -327,7 +303,7 @@ func (r *ScalerReconciler) drainNode(currentStatus opsterv1.ComponentStatus, cur
 		Status:      "Drained",
 		Description: nodePoolGroupName,
 	}
-	lg.Info(fmt.Sprintf("Group-%s .node %s node is drained (IP: %s)", nodePoolGroupName, lastReplicaNodeName, podIp))
+	lg.Info(fmt.Sprintf("Group-%s .node %s node is drained", nodePoolGroupName, lastReplicaNodeName))
 	r.instance.Status.ComponentsStatus = helpers.Replace(currentStatus, componentStatus, r.instance.Status.ComponentsStatus)
 	err = r.Status().Update(r.ctx, r.instance)
 	if err != nil {
@@ -380,23 +356,14 @@ func (r *ScalerReconciler) removeStatefulSet(sts appsv1.StatefulSet) (*ctrl.Resu
 	r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Scaler", "Finished os client for scaling ")
 
 	workingOrdinal := pointer.Int32Deref(sts.Spec.Replicas, 1) - 1
-
 	lastReplicaNodeName := helpers.ReplicaHostName(sts, workingOrdinal)
-
-	// CRITEO WORKAROUND: use node ip
-	podIp, err := helpers.ReplicaHostIp(r.ctx, r.Client, sts, workingOrdinal)
+	_, err = services.AppendExcludeNodeHost(clusterClient, lastReplicaNodeName)
 	if err != nil {
-		lg.Error(err, "Failed to resolve IP for pod %s", lastReplicaNodeName)
+		lg.Error(err, fmt.Sprintf("failed to exclude node %s", lastReplicaNodeName))
 		return nil, err
 	}
 
-	_, err = services.AppendExcludeNodeHostIp(clusterClient, podIp)
-	if err != nil {
-		lg.Error(err, fmt.Sprintf("failed to exclude node %s (IP: %s)", lastReplicaNodeName, podIp))
-		return nil, err
-	}
-
-	nodeNotEmpty, err := services.HasShardsOnNodeIp(clusterClient, podIp)
+	nodeNotEmpty, err := services.HasShardsOnNode(clusterClient, lastReplicaNodeName)
 	if err != nil {
 		lg.Error(err, "failed to check shards on node")
 		r.recorder.AnnotatedEventf(r.instance, annotations, "Warning", "Scaler", "Failed to check shards on node")
@@ -430,9 +397,9 @@ func (r *ScalerReconciler) removeStatefulSet(sts appsv1.StatefulSet) (*ctrl.Resu
 		if err != nil {
 			return result, err
 		}
-		_, err = services.RemoveExcludeNodeHostIp(clusterClient, podIp)
+		_, err = services.RemoveExcludeNodeHost(clusterClient, lastReplicaNodeName)
 		if err != nil {
-			lg.Error(err, fmt.Sprintf("failed to remove node exclusion for %s (IP: %s)", lastReplicaNodeName, podIp))
+			lg.Error(err, fmt.Sprintf("failed to remove node exclusion for %s", lastReplicaNodeName))
 		}
 		return result, err
 	}
@@ -443,9 +410,9 @@ func (r *ScalerReconciler) removeStatefulSet(sts appsv1.StatefulSet) (*ctrl.Resu
 		return result, err
 	}
 
-	_, err = services.RemoveExcludeNodeHostIp(clusterClient, podIp)
+	_, err = services.RemoveExcludeNodeHost(clusterClient, lastReplicaNodeName)
 	if err != nil {
-		lg.Error(err, fmt.Sprintf("failed to remove node exclusion for %s (IP: %s)", lastReplicaNodeName, podIp))
+		lg.Error(err, fmt.Sprintf("failed to remove node exclusion for %s", lastReplicaNodeName))
 	}
 	r.recorder.AnnotatedEventf(r.instance, annotations, "Noraml", "Scaler", "Finished scaling")
 	return result, err
