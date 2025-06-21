@@ -83,6 +83,34 @@ func (r *ScalerReconciler) reconcileNodePool(nodePool *opsterv1.NodePool) (bool,
 	comp := r.instance.Status.ComponentsStatus
 	currentStatus, found := helpers.FindFirstPartial(comp, componentStatus, helpers.GetByDescriptionAndGroup)
 
+	if currentStatus.Status == "Waiting" {
+		if currentSts.Status.ReadyReplicas != *currentSts.Spec.Replicas {
+			// pods are coming up or getting deleted, continue to wait
+			lg.Info(fmt.Sprintf("Group-%s . waiting to have correct number of readyPods %d/%d to continue scaling", nodePool.Component, currentSts.Status.ReadyReplicas, *currentSts.Spec.Replicas))
+			return true, nil
+		}
+
+		if r.instance.Spec.ConfMgmt.SmartScaler {
+			// stable point reached during down scale, remove previous node from exclusion
+			err := r.cleanupExclusionList(currentSts, nodePool.Component)
+			if err != nil {
+				lg.Error(err, "failed to cleanup exclusion list")
+				return true, err
+			}
+		}
+
+		// Change the status to running and reconcile again
+		componentStatus.Status = "Running"
+		r.instance.Status.ComponentsStatus = helpers.Replace(currentStatus, componentStatus, r.instance.Status.ComponentsStatus)
+		err := r.Status().Update(r.ctx, r.instance)
+		if err != nil {
+			lg.Error(err, "failed to update status")
+			return false, err
+		}
+		lg.Info(fmt.Sprintf("Group-%s . resuming scaling", nodePool.Component))
+		return true, nil
+	}
+
 	var desireReplicaDiff = *currentSts.Spec.Replicas - nodePool.Replicas
 	if desireReplicaDiff == 0 {
 		// If a scaling operation was started before for this nodePool
@@ -176,34 +204,52 @@ func (r *ScalerReconciler) decreaseOneNode(currentStatus opsterv1.ComponentStatu
 		return true, err
 	}
 	lg.Info(fmt.Sprintf("Group-%s . removed node %s", nodePoolGroupName, lastReplicaNodeName))
-	r.instance.Status.ComponentsStatus = helpers.RemoveIt(currentStatus, r.instance.Status.ComponentsStatus)
+
+	if smartDecrease {
+		// switch state machine to Waiting state as we need to wait for node to be effectively down to remove it from exclusion list
+		componentStatus := opsterv1.ComponentStatus{
+			Component:   "Scaler",
+			Status:      "Waiting",
+			Description: nodePoolGroupName,
+		}
+		r.instance.Status.ComponentsStatus = helpers.Replace(currentStatus, componentStatus, r.instance.Status.ComponentsStatus)
+	} else {
+		r.instance.Status.ComponentsStatus = helpers.RemoveIt(currentStatus, r.instance.Status.ComponentsStatus)
+	}
 	err = r.Status().Update(r.ctx, r.instance)
 	if err != nil {
 		lg.Error(err, "failed to update status")
 		return false, err
 	}
 
-	if !smartDecrease {
-		return false, err
-	}
+	return smartDecrease, err
+}
+
+func (r *ScalerReconciler) cleanupExclusionList(currentSts appsv1.StatefulSet, nodePoolGroupName string) error {
+	lg := log.FromContext(r.ctx)
+	annotations := map[string]string{"cluster-name": r.instance.GetName()}
+	lastReplicaNodeName := helpers.ReplicaHostName(currentSts, *currentSts.Spec.Replicas)
+
 	username, password, err := helpers.UsernameAndPassword(r.ctx, r.Client, r.instance)
 	if err != nil {
-		return true, err
+		return err
 	}
+
 	clusterClient, err := services.NewOsClusterClient(builders.URLForCluster(r.instance), username, password)
 	if err != nil {
 		lg.Error(err, "failed to create os client")
 		r.recorder.AnnotatedEventf(r.instance, annotations, "WARN", "failed to remove node exclude", "Group-%s . failed to remove node exclude %s", nodePoolGroupName, lastReplicaNodeName)
-		return true, err
+		return err
 	}
 
 	success, err := services.RemoveExcludeNodeHost(clusterClient, lastReplicaNodeName)
 	if !success || err != nil {
 		lg.Error(err, fmt.Sprintf("failed to remove exclude node %s", lastReplicaNodeName))
 		r.recorder.AnnotatedEventf(r.instance, annotations, "Warning", "Scaler", "Failed to remove node exclude - Group-%s , node  %s", nodePoolGroupName, lastReplicaNodeName)
+		return err
 	}
 
-	return false, err
+	return err
 }
 
 func (r *ScalerReconciler) excludeNode(currentStatus opsterv1.ComponentStatus, currentSts appsv1.StatefulSet, nodePoolGroupName string) error {
