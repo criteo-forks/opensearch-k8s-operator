@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"strings"
 
 	"opensearch.opster.io/opensearch-gateway/responses"
@@ -40,7 +41,17 @@ func HasShardsOnNode(service *OsClusterClient, nodeName string) (bool, error) {
 		if shardsData.NodeName == nodeName {
 			return true, err
 		}
+
+		if shardsData.State == "RELOCATING" {
+			// syntax of name column is a bit different when shard is relocating
+			// source_node_name -> dest_node_ip dest_node_id dest_node_name
+			prefix := fmt.Sprintf("%s ", nodeName)
+			if strings.HasPrefix(shardsData.NodeName, prefix) || strings.HasSuffix(shardsData.NodeName, nodeName) {
+				return true, err
+			}
+		}
 	}
+
 	return false, err
 }
 
