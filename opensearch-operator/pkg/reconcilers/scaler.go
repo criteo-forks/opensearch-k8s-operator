@@ -145,6 +145,18 @@ func (r *ScalerReconciler) reconcileNodePool(nodePool *opsterv1.NodePool) (bool,
 		}
 
 		if desireReplicaDiff > 0 {
+			isSafe, err := r.isScaleDownSafe()
+			if err != nil {
+				r.recorder.AnnotatedEventf(r.instance, annotations, "Warning", "Scaler", "Failed to determine if cluster is green")
+				lg.Error(err, "failed to get cluster state")
+				return true, err
+			}
+
+			if !isSafe {
+				lg.Info(fmt.Sprintf("Group-%s . delaying scale down - cluster is not in good shape", nodePool.Component))
+				return true, nil
+			}
+
 			r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Scaler", "Starting to scaling")
 			if !r.instance.Spec.ConfMgmt.SmartScaler {
 				requeue, err := r.decreaseOneNode(currentStatus, currentSts, nodePool.Component, r.instance.Spec.ConfMgmt.SmartScaler)
@@ -152,7 +164,8 @@ func (r *ScalerReconciler) reconcileNodePool(nodePool *opsterv1.NodePool) (bool,
 				r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Scaler", "Starting to decrease node")
 				return requeue, err
 			}
-			err := r.excludeNode(currentStatus, currentSts, nodePool.Component)
+
+			err = r.excludeNode(currentStatus, currentSts, nodePool.Component)
 			return true, err
 
 		}
@@ -223,6 +236,32 @@ func (r *ScalerReconciler) decreaseOneNode(currentStatus opsterv1.ComponentStatu
 	}
 
 	return smartDecrease, err
+}
+
+func (r *ScalerReconciler) isScaleDownSafe() (bool, error) {
+	lg := log.FromContext(r.ctx)
+
+	username, password, err := helpers.UsernameAndPassword(r.ctx, r.Client, r.instance)
+	if err != nil {
+		return false, err
+	}
+
+	clusterClient, err := services.NewOsClusterClient(builders.URLForCluster(r.instance), username, password)
+	if err != nil {
+		lg.Error(err, "failed to create os client")
+		return false, err
+	}
+
+	health, err := clusterClient.GetHealth()
+	if err != nil {
+		return false, err
+	}
+
+	if health.Status != "green" {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func (r *ScalerReconciler) cleanupExclusionList(currentSts appsv1.StatefulSet, nodePoolGroupName string) error {
