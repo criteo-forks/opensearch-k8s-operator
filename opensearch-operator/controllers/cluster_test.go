@@ -379,7 +379,7 @@ var _ = Describe("Cluster Reconciler", func() {
 
 			Eventually(func() bool {
 				stsList := &appsv1.StatefulSetList{}
-				err := k8sClient.List(context.Background(), stsList, client.InNamespace(OpensearchCluster.Name))
+				err := k8sClient.List(context.Background(), stsList, client.InNamespace(OpensearchCluster.Namespace))
 				if err != nil {
 					return false
 				}
