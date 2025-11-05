@@ -352,6 +352,14 @@ func NewSTSForNodePool(
 		initContainers = append(initContainers, keystoreInitContainer)
 	}
 
+	// CRITEO WORKAROUND
+	hostNetwork := true
+	if node.HostNetwork != nil {
+		hostNetwork = *node.HostNetwork
+	} else if cr.Spec.General.HostNetwork != nil {
+		hostNetwork = *cr.Spec.General.HostNetwork
+	}
+
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        cr.Name + "-" + node.Component,
@@ -433,8 +441,7 @@ func NewSTSForNodePool(
 							SecurityContext: securityContext,
 						},
 					},
-					HostNetwork:               true,                              // CRITEO WORKAROUND
-					DNSPolicy:                 corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
+					HostNetwork:               hostNetwork,                       // CRITEO WORKAROUND
 					InitContainers:            initContainers,
 					Volumes:                   volumes,
 					ServiceAccountName:        cr.Spec.General.ServiceAccount,
@@ -455,6 +462,11 @@ func NewSTSForNodePool(
 			}(),
 			ServiceName: cr.Spec.General.ServiceName,
 		},
+	}
+
+	// CRITEO WORKAROUND
+	if hostNetwork {
+		sts.Spec.Template.Spec.DNSPolicy = corev1.DNSClusterFirstWithHostNet
 	}
 
 	// Append additional config to env vars
@@ -768,6 +780,14 @@ func NewBootstrapPod(
 		})
 	}
 
+	// CRITEO WORKAROUND
+	hostNetwork := true
+	if cr.Spec.Bootstrap.HostNetwork != nil {
+		hostNetwork = *cr.Spec.Bootstrap.HostNetwork
+	} else if cr.Spec.General.HostNetwork != nil {
+		hostNetwork = *cr.Spec.General.HostNetwork
+	}
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      BootstrapPodName(cr),
@@ -798,8 +818,7 @@ func NewBootstrapPod(
 					SecurityContext: securityContext,
 				},
 			},
-			HostNetwork:        true,                              // CRITEO WORKAROUND
-			DNSPolicy:          corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
+			HostNetwork:        hostNetwork,                       // CRITEO WORKAROUND
 			InitContainers:     initContainers,
 			Volumes:            volumes,
 			ServiceAccountName: cr.Spec.General.ServiceAccount,
@@ -809,6 +828,11 @@ func NewBootstrapPod(
 			ImagePullSecrets:   image.ImagePullSecrets,
 			SecurityContext:    podSecurityContext,
 		},
+	}
+
+	// CRITEO WORKAROUND
+	if hostNetwork {
+		pod.Spec.DNSPolicy = corev1.DNSClusterFirstWithHostNet
 	}
 
 	if cr.Spec.General.SetVMMaxMapCount {
@@ -928,7 +952,13 @@ func NewSnapshotRepoconfigUpdateJob(
 	podSecurityContext := instance.Spec.General.PodSecurityContext
 	securityContext := instance.Spec.General.SecurityContext
 
-	return batchv1.Job{
+	// CRITEO WORKAROUND
+	hostNetwork := true
+	if instance.Spec.Dashboards.HostNetwork != nil {
+		hostNetwork = *instance.Spec.General.HostNetwork
+	}
+
+	job := batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: namespace, Annotations: annotations},
 		Spec: batchv1.JobSpec{
 			BackoffLimit: &backoffLimit,
@@ -949,12 +979,18 @@ func NewSnapshotRepoconfigUpdateJob(
 					RestartPolicy:      corev1.RestartPolicyNever,
 					Volumes:            volumes,
 					SecurityContext:    podSecurityContext,
-					HostNetwork:        true,                              // CRITEO WORKAROUND
-					DNSPolicy:          corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
+					HostNetwork:        hostNetwork,                       // CRITEO WORKAROUND
 				},
 			},
 		},
 	}
+
+	// CRITEO WORKAROUND
+	if hostNetwork {
+		job.Spec.Template.Spec.DNSPolicy = corev1.DNSClusterFirstWithHostNet
+	}
+
+	return job
 }
 
 func NewSecurityconfigUpdateJob(
@@ -992,7 +1028,13 @@ func NewSecurityconfigUpdateJob(
 	securityContext := instance.Spec.General.SecurityContext
 	podSecurityContext := instance.Spec.General.PodSecurityContext
 
-	return batchv1.Job{
+	// CRITEO WORKAROUND
+	hostNetwork := true
+	if instance.Spec.Dashboards.HostNetwork != nil {
+		hostNetwork = *instance.Spec.General.HostNetwork
+	}
+
+	job := batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: namespace, Annotations: annotations},
 		Spec: batchv1.JobSpec{
 			BackoffLimit: &backoffLimit,
@@ -1014,12 +1056,18 @@ func NewSecurityconfigUpdateJob(
 					RestartPolicy:      corev1.RestartPolicyNever,
 					ImagePullSecrets:   image.ImagePullSecrets,
 					SecurityContext:    podSecurityContext,
-					HostNetwork:        true,                              // CRITEO WORKAROUND
-					DNSPolicy:          corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
+					HostNetwork:        hostNetwork,                       // CRITEO WORKAROUND
 				},
 			},
 		},
 	}
+
+	// CRITEO WORKAROUND
+	if hostNetwork {
+		job.Spec.Template.Spec.DNSPolicy = corev1.DNSClusterFirstWithHostNet
+	}
+
+	return job
 }
 
 func AllMastersReady(ctx context.Context, k8sClient client.Client, cr *opsterv1.OpenSearchCluster) bool {
