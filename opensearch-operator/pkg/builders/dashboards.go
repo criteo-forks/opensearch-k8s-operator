@@ -121,7 +121,15 @@ func NewDashboardsDeploymentForCR(cr *opsterv1.OpenSearchCluster, volumes []core
 
 	mainCommand := helpers.BuildMainCommandOSD("./bin/opensearch-dashboards-plugin", cr.Spec.Dashboards.PluginsList, "./opensearch-dashboards-docker-entrypoint.sh")
 
-	return &appsv1.Deployment{
+	// CRITEO WORKAROUND
+	hostNetwork := true
+	if cr.Spec.Dashboards.HostNetwork != nil {
+		hostNetwork = *cr.Spec.Dashboards.HostNetwork
+	} else if cr.Spec.General.HostNetwork != nil {
+		hostNetwork = *cr.Spec.General.HostNetwork
+	}
+
+	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cr.Name + "-dashboards",
 			Namespace: cr.Namespace,
@@ -142,8 +150,7 @@ func NewDashboardsDeploymentForCR(cr *opsterv1.OpenSearchCluster, volumes []core
 				},
 				Spec: corev1.PodSpec{
 					Volumes:     volumes,
-					HostNetwork: true,                              // CRITEO WORKAROUND
-					DNSPolicy:   corev1.DNSClusterFirstWithHostNet, // CRITEO WORKAROUND
+					HostNetwork: hostNetwork,                              // CRITEO WORKAROUND
 					Containers: []corev1.Container{
 						{
 							Name:            "dashboards",
@@ -174,6 +181,13 @@ func NewDashboardsDeploymentForCR(cr *opsterv1.OpenSearchCluster, volumes []core
 			},
 		},
 	}
+
+	// CRITEO WORKAROUND
+	if hostNetwork {
+		deployment.Spec.Template.Spec.DNSPolicy = corev1.DNSClusterFirstWithHostNet
+	}
+
+	return deployment
 }
 
 func NewDashboardsConfigMapForCR(cr *opsterv1.OpenSearchCluster, name string, config map[string]string) *corev1.ConfigMap {

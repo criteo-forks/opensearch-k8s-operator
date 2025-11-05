@@ -38,6 +38,7 @@ type GeneralConfig struct {
 	Vendor           string  `json:"vendor,omitempty"`
 	Version          string  `json:"version,omitempty"`
 	ServiceAccount   string  `json:"serviceAccount,omitempty"`
+	HostNetwork      *bool   `json:"hostNetwork,omitempty"`
 	ServiceName      string  `json:"serviceName"`
 	SetVMMaxMapCount bool    `json:"setVMMaxMapCount,omitempty"`
 	DefaultRepo      *string `json:"defaultRepo,omitempty"`
@@ -81,6 +82,7 @@ type NodePool struct {
 	Tolerations               []corev1.Toleration               `json:"tolerations,omitempty"`
 	NodeSelector              map[string]string                 `json:"nodeSelector,omitempty"`
 	Affinity                  *corev1.Affinity                  `json:"affinity,omitempty"`
+	HostNetwork               *bool                             `json:"hostNetwork,omitempty"`
 	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
 	Persistence               *PersistenceConfig                `json:"persistence,omitempty"`
 	AdditionalConfig          map[string]string                 `json:"additionalConfig,omitempty"`
@@ -131,6 +133,7 @@ type BootstrapConfig struct {
 	Resources    corev1.ResourceRequirements `json:"resources,omitempty"`
 	Tolerations  []corev1.Toleration         `json:"tolerations,omitempty"`
 	NodeSelector map[string]string           `json:"nodeSelector,omitempty"`
+	HostNetwork  *bool                       `json:"hostNetwork,omitempty"`
 	Affinity     *corev1.Affinity            `json:"affinity,omitempty"`
 	Jvm          string                      `json:"jvm,omitempty"`
 	// Extra items to add to the opensearch.yml, defaults to General.AdditionalConfig
@@ -162,6 +165,7 @@ type DashboardsConfig struct {
 	Tolerations                 []corev1.Toleration         `json:"tolerations,omitempty"`
 	NodeSelector                map[string]string           `json:"nodeSelector,omitempty"`
 	Affinity                    *corev1.Affinity            `json:"affinity,omitempty"`
+	HostNetwork                 *bool                       `json:"hostNetwork,omitempty"`
 	Labels                      map[string]string           `json:"labels,omitempty"`
 	Annotations                 map[string]string           `json:"annotations,omitempty"`
 	Service                     DashboardsServiceSpec       `json:"service,omitempty"`
