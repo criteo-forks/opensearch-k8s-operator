@@ -65,8 +65,12 @@ func NewDashboardsDeploymentForCR(cr *opsterv1.OpenSearchCluster, volumes []core
 		env = append(env, corev1.EnvVar{Name: "OPENSEARCH_PASSWORD", Value: "admin"})
 	}
 
-	labels := map[string]string{
+	selectorLabels := map[string]string{
 		"opensearch.cluster.dashboards": cr.Name,
+	}
+	labels := make(map[string]string, len(selectorLabels)+len(cr.Spec.Dashboards.Labels))
+	for key, value := range selectorLabels {
+		labels[key] = value
 	}
 
 	// cr.Spec.Dashboards.labels
@@ -138,7 +142,7 @@ func NewDashboardsDeploymentForCR(cr *opsterv1.OpenSearchCluster, volumes []core
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
-				MatchLabels: labels,
+				MatchLabels: selectorLabels,
 			},
 			Strategy: appsv1.DeploymentStrategy{
 				Type: appsv1.RollingUpdateDeploymentStrategyType,
@@ -150,7 +154,7 @@ func NewDashboardsDeploymentForCR(cr *opsterv1.OpenSearchCluster, volumes []core
 				},
 				Spec: corev1.PodSpec{
 					Volumes:     volumes,
-					HostNetwork: hostNetwork,                              // CRITEO WORKAROUND
+					HostNetwork: hostNetwork, // CRITEO WORKAROUND
 					Containers: []corev1.Container{
 						{
 							Name:            "dashboards",
