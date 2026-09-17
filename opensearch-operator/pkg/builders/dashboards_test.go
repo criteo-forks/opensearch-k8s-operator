@@ -56,6 +56,9 @@ var _ = Describe("Builders", func() {
 				"testLabelKey":                  "testValue",
 				"testLabelKey2":                 "testValue2",
 			}))
+			Expect(result.Spec.Selector.MatchLabels).To(Equal(map[string]string{
+				"opensearch.cluster.dashboards": clusterName,
+			}))
 		})
 	})
 
