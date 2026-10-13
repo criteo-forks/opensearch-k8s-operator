@@ -57,8 +57,6 @@ spec:
                     description: Extra items to add to the opensearch.yml, defaults
                       to General.AdditionalConfig
                     type: object
-                  hostNetwork:
-                    type: boolean
                   affinity:
                     description: Affinity is a group of affinity scheduling rules.
                     properties:
@@ -1219,8 +1217,6 @@ spec:
                       - path
                       type: object
                     type: array
-                  hostNetwork:
-                    type: boolean
                   affinity:
                     description: Affinity is a group of affinity scheduling rules.
                     properties:
@@ -3345,8 +3341,6 @@ spec:
                             type: string
                         type: object
                     type: object
-                  hostNetwork:
-                    type: boolean
                   serviceAccount:
                     type: string
                   serviceName:
@@ -3462,8 +3456,6 @@ spec:
                       additionalProperties:
                         type: string
                       type: object
-                    hostNetwork:
-                      type: boolean
                     affinity:
                       description: Affinity is a group of affinity scheduling rules.
                       properties:
