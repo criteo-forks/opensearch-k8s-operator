@@ -46,14 +46,16 @@ do
 echo 'Waiting to connect to the cluster'; sleep 120;
 done;`
 
+	// CRITEO - Add --explicit-replicas 0-2 to force .opendistro_security index to be created with auto-expand mode enabled, up to 2 replicas
 	ApplyAllYmlCmdTmpl = `count=0;
-until $ADMIN -ts /usr/share/opensearch/jdk/lib/security/cacerts -cert %s -key %s -cd %s -icl -nhnv -h %s -p %v || (( count++ >= 20 ));
+until $ADMIN -ts /usr/share/opensearch/jdk/lib/security/cacerts -cert %s -key %s -cd %s --explicit-replicas 0-2 -icl -nhnv -h %s -p %v || (( count++ >= 20 ));
 do
 sleep 20;
 done;`
 
+	// CRITEO - Add --explicit-replicas 0-2 to force .opendistro_security index to be created with auto-expand mode enabled, up to 2 replicas
 	ApplySingleYmlCmdTmpl = `count=0;
-until $ADMIN -ts /usr/share/opensearch/jdk/lib/security/cacerts -cert %s -key %s -f %s -t %s -icl -nhnv -h %s -p %v || (( count++ >= 20 ));
+until $ADMIN -ts /usr/share/opensearch/jdk/lib/security/cacerts -cert %s -key %s -f %s -t %s --explicit-replicas 0-2 -icl -nhnv -h %s -p %v || (( count++ >= 20 ));
 do
 sleep 20;
 done;`
