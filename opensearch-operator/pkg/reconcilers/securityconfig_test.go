@@ -293,7 +293,7 @@ until curl -k --silent https://no-securityconfig-tls-configured.no-securityconfi
 do
 echo 'Waiting to connect to the cluster'; sleep 120;
 done;count=0;
-until $ADMIN -cacert /certs/ca.crt -cert /certs/tls.crt -key /certs/tls.key -cd /usr/share/opensearch/config/opensearch-security -icl -nhnv -h no-securityconfig-tls-configured.no-securityconfig-tls-configured.svc.cluster.local -p 9200 || (( count++ >= 20 ));
+until $ADMIN -cacert /certs/ca.crt -cert /certs/tls.crt -key /certs/tls.key -cd /usr/share/opensearch/config/opensearch-security --explicit-replicas 0-2 -icl -nhnv -h no-securityconfig-tls-configured.no-securityconfig-tls-configured.svc.cluster.local -p 9200 || (( count++ >= 20 ));
 do
 sleep 20;
 done;`
