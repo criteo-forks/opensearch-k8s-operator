@@ -8,6 +8,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
@@ -40,6 +41,8 @@ type K8sClient interface {
 	ReconcileResource(runtime.Object, reconciler.DesiredState) (*ctrl.Result, error)
 	GetPod(name, namespace string) (corev1.Pod, error)
 	DeletePod(pod *corev1.Pod) error
+	// CRITEO: evict instead of delete so PodDisruptionBudgets are respected
+	EvictPod(pod *corev1.Pod) error
 	ListPods(listOptions *client.ListOptions) (corev1.PodList, error)
 	GetPVC(name, namespace string) (corev1.PersistentVolumeClaim, error)
 	UpdatePVC(pvc *corev1.PersistentVolumeClaim) error
@@ -206,6 +209,12 @@ func (c K8sClientImpl) GetPod(name, namespace string) (corev1.Pod, error) {
 
 func (c K8sClientImpl) DeletePod(pod *corev1.Pod) error {
 	return c.Delete(c.ctx, pod)
+}
+
+// CRITEO: Eviction API uses compare-and-swap against the PDB, closing the
+// "delete returns before the pod is gone" race in rolling restart / upgrade.
+func (c K8sClientImpl) EvictPod(pod *corev1.Pod) error {
+	return c.SubResource("eviction").Create(c.ctx, pod, &policyv1.Eviction{})
 }
 
 func (c K8sClientImpl) ListPods(listOptions *client.ListOptions) (corev1.PodList, error) {

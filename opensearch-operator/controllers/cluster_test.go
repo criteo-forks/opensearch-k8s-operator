@@ -368,7 +368,8 @@ var _ = Describe("Cluster Reconciler", func() {
 				return OpensearchCluster.Status.Version == "2.0.0"
 			}, timeout, interval).Should(BeTrue())
 		})
-		It("should create a pdb resource", func() {
+		// CRITEO: handlePDB is disabled, PDBs come from the crto-opensearch-cluster chart
+		PIt("should create a pdb resource", func() {
 			pdb := policyv1.PodDisruptionBudget{}
 			Eventually(func() bool {
 				if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: clusterName + "-master-pdb", Namespace: OpensearchCluster.Namespace}, &pdb); err != nil {

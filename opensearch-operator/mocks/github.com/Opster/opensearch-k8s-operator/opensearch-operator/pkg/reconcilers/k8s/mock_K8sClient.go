@@ -561,6 +561,52 @@ func (_c *MockK8sClient_DeleteStatefulSet_Call) RunAndReturn(run func(*appsv1.St
 	return _c
 }
 
+// EvictPod provides a mock function with given fields: pod
+func (_m *MockK8sClient) EvictPod(pod *v1.Pod) error {
+	ret := _m.Called(pod)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EvictPod")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.Pod) error); ok {
+		r0 = rf(pod)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockK8sClient_EvictPod_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EvictPod'
+type MockK8sClient_EvictPod_Call struct {
+	*mock.Call
+}
+
+// EvictPod is a helper method to define mock.On call
+//   - pod *v1.Pod
+func (_e *MockK8sClient_Expecter) EvictPod(pod interface{}) *MockK8sClient_EvictPod_Call {
+	return &MockK8sClient_EvictPod_Call{Call: _e.mock.On("EvictPod", pod)}
+}
+
+func (_c *MockK8sClient_EvictPod_Call) Run(run func(pod *v1.Pod)) *MockK8sClient_EvictPod_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.Pod))
+	})
+	return _c
+}
+
+func (_c *MockK8sClient_EvictPod_Call) Return(_a0 error) *MockK8sClient_EvictPod_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockK8sClient_EvictPod_Call) RunAndReturn(run func(*v1.Pod) error) *MockK8sClient_EvictPod_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetConfigMap provides a mock function with given fields: name, namespace
 func (_m *MockK8sClient) GetConfigMap(name string, namespace string) (v1.ConfigMap, error) {
 	ret := _m.Called(name, namespace)

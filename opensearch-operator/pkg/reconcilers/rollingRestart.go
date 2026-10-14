@@ -91,12 +91,21 @@ func (r *RollingRestartReconciler) Reconcile() (ctrl.Result, error) {
 			}
 
 		}
-		if sts.Status.ReadyReplicas != ptr.Deref(sts.Spec.Replicas, 1) {
+		// CRITEO: sts.Status.ReadyReplicas can be inconsistent. CountRunningPodsForNodePool is more reliable
+		// as it uses listing of pods. It helps avoiding race conditions.
+		numReadyPods, err := helpers.CountRunningPodsForNodePool(r.client, r.instance, &nodePool)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		expectedReplicas := int(ptr.Deref(sts.Spec.Replicas, 1))
+		if numReadyPods != expectedReplicas {
+			lg.Info(fmt.Sprintf("NodePool %s doesn't have the correct number of readyPods %d/%d", nodePool.Component, numReadyPods, expectedReplicas))
 			return ctrl.Result{
 				Requeue:      true,
-				RequeueAfter: 10 * time.Second,
+				RequeueAfter: 30 * time.Second,
 			}, nil
 		}
+		lg.Info(fmt.Sprintf("NodePool %s have the correct number of readyPods %d/%d", nodePool.Component, numReadyPods, expectedReplicas))
 	}
 
 	if !pendingUpdate {
@@ -118,6 +127,8 @@ func (r *RollingRestartReconciler) Reconcile() (ctrl.Result, error) {
 		lg.V(1).Info("No pods pending restart")
 		return ctrl.Result{}, nil
 	}
+
+	lg.Info("Processing roll restart")
 
 	// Skip a rolling restart if the cluster hasn't finished initializing
 	if !r.instance.Status.Initialized {
@@ -203,7 +214,9 @@ func (r *RollingRestartReconciler) restartStatefulSetPod(sts *appsv1.StatefulSet
 		}, nil
 	}
 
-	err = r.client.DeletePod(&corev1.Pod{
+	// CRITEO: Instead of using Delete, we use Eviction to help prevent race conditions
+	lg.Info(fmt.Sprintf("Evicting %s", workingPod))
+	err = r.client.EvictPod(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      workingPod,
 			Namespace: sts.Namespace,

@@ -291,16 +291,25 @@ func (r *UpgradeReconciler) doNodePoolUpgrade(pool opsterv1.NodePool) error {
 		return err
 	}
 
+	r.logger.Info(fmt.Sprintf("Processing upgrade of NodePool %s", pool.Component))
+
 	dataCount := util.DataNodesCount(r.client, r.instance)
 	if dataCount == 2 && r.instance.Spec.General.DrainDataNodes {
 		r.logger.Info("Only 2 data nodes and drain is set, some shards may not drain")
 	}
 
-	if sts.Status.ReadyReplicas < lo.FromPtrOr(sts.Spec.Replicas, 1) {
-		r.logger.Info("Waiting for all pods to be ready")
-		conditions = append(conditions, "Waiting for all pods to be ready")
-		r.setComponentConditions(conditions, pool.Component)
-		return nil
+	// CRITEO: sts.Status.ReadyReplicas can be inconsistent. CountRunningPodsForNodePool is more reliable
+	// as it uses listing of pods. It helps avoiding race conditions.
+	if numReadyPods, err := helpers.CountRunningPodsForNodePool(r.client, r.instance, &pool); err == nil {
+		expectedReplicas := int(lo.FromPtrOr(sts.Spec.Replicas, 1))
+		if numReadyPods != expectedReplicas {
+			r.logger.Info(fmt.Sprintf("Waiting for all pods to be ready for NodePool %s %d/%d", pool.Component, numReadyPods, expectedReplicas))
+			conditions = append(conditions, "Waiting for all pods to be ready")
+			r.setComponentConditions(conditions, pool.Component)
+			return nil
+		}
+	} else {
+		return err
 	}
 
 	ready, condition, err := services.CheckClusterStatusForRestart(r.osClient, r.instance.Spec.General.DrainDataNodes)
@@ -361,14 +370,17 @@ func (r *UpgradeReconciler) doNodePoolUpgrade(pool opsterv1.NodePool) error {
 		return nil
 	}
 
-	err = r.client.DeletePod(&corev1.Pod{
+	// CRITEO: Instead of using Delete, we use Eviction to help prevent race conditions
+	r.logger.Info(fmt.Sprintf("Evicting %s", workingPod))
+	err = r.client.EvictPod(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      workingPod,
 			Namespace: sts.Namespace,
 		},
 	})
+
 	if err != nil {
-		conditions = append(conditions, "Could not delete pod")
+		conditions = append(conditions, "Could not evict pod")
 		r.setComponentConditions(conditions, pool.Component)
 		return err
 	}
