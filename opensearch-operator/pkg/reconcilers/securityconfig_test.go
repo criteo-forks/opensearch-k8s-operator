@@ -110,6 +110,7 @@ var _ = Describe("Securityconfig Reconciler", func() {
 			}
 			mockClient.EXPECT().GetSecret("securityconfig-secret", clusterName).Return(*securityConfigSecret, nil)
 			mockClient.EXPECT().GetJob("securityconfig-securityconfig-update", clusterName).Return(batchv1.Job{}, NotFoundError())
+			mockClient.EXPECT().GetSecret("securityconfig-admin-cert", clusterName).Return(corev1.Secret{Data: map[string][]byte{CaCertKey: []byte("ca")}}, nil)
 			mockClient.EXPECT().Scheme().Return(scheme.Scheme)
 
 			var createdJob *batchv1.Job
@@ -177,6 +178,7 @@ var _ = Describe("Securityconfig Reconciler", func() {
 			}
 			mockClient.EXPECT().GetSecret("securityconfig-secret", clusterName).Return(securityConfigSecret, nil)
 			mockClient.EXPECT().GetJob("securityconfig-withadminsecret-securityconfig-update", clusterName).Return(batchv1.Job{}, NotFoundError())
+			mockClient.EXPECT().GetSecret("admin-cert", clusterName).Return(corev1.Secret{Data: map[string][]byte{CaCertKey: []byte("ca")}}, nil)
 			mockClient.EXPECT().Scheme().Return(scheme.Scheme)
 
 			var createdJob *batchv1.Job
@@ -265,6 +267,7 @@ var _ = Describe("Securityconfig Reconciler", func() {
 			}
 
 			mockClient.EXPECT().GetJob("no-securityconfig-tls-configured-securityconfig-update", clusterName).Return(batchv1.Job{}, NotFoundError())
+			mockClient.EXPECT().GetSecret("no-securityconfig-tls-configured-admin-cert", clusterName).Return(corev1.Secret{Data: map[string][]byte{CaCertKey: []byte("ca")}}, nil)
 			mockClient.EXPECT().Scheme().Return(scheme.Scheme)
 			var createdJob *batchv1.Job
 			mockClient.On("CreateJob", mock.Anything).

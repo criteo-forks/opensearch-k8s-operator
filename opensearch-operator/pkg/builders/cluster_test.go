@@ -724,7 +724,7 @@ var _ = Describe("Builders", func() {
 			sts := NewSTSForNodePool("foobar", &clusterObject, nodePool, "foobar", nil, nil, nil)
 			Expect(sts.Spec.Template.Spec.ServiceAccountName).To(Equal(serviceAccount))
 
-			job := NewSecurityconfigUpdateJob(&clusterObject, "foobar", "foobar", "foobar", "admin-cert", "cmd", nil, nil)
+			job := NewSecurityconfigUpdateJob(&clusterObject, "foobar", "foobar", "foobar", "admin-cert", "", "cmd", nil, nil)
 			Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal(serviceAccount))
 		})
 	})
@@ -936,7 +936,7 @@ var _ = Describe("Builders", func() {
 				},
 			}
 
-			job := NewSecurityconfigUpdateJob(&clusterObject, "dummy", "dummy", "dummy", "dummy", "dummy", nil, nil)
+			job := NewSecurityconfigUpdateJob(&clusterObject, "dummy", "dummy", "dummy", "dummy", "", "dummy", nil, nil)
 			Expect(job.Spec.Template.Spec.Containers[0].Resources).To(Equal(clusterObject.Spec.Security.Config.UpdateJob.Resources))
 		})
 
@@ -954,7 +954,7 @@ var _ = Describe("Builders", func() {
 				},
 			}
 
-			job := NewSecurityconfigUpdateJob(&clusterObject, "dummy", "dummy", "dummy", "dummy", "dummy", nil, nil)
+			job := NewSecurityconfigUpdateJob(&clusterObject, "dummy", "dummy", "dummy", "dummy", "", "dummy", nil, nil)
 			Expect(job.Spec.Template.Spec.Containers[0].Resources).To(Equal(clusterObject.Spec.Security.Config.UpdateJob.Resources))
 		})
 	})

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -161,6 +162,21 @@ func (r *SecurityconfigReconciler) Reconcile() (ctrl.Result, error) {
 			fmt.Sprintf(ApplyAllYmlCmdTmpl, caCert, adminCert, adminKey, securityconfigPath, clusterHostName, securityConfigPort)
 	}
 
+	endpointCASecretName, err := r.resolveEndpointCASecret(namespace, adminCertName, annotations)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			r.logger.Info(fmt.Sprintf("Waiting for secret that contains the endpoint CA certificate: %v", err))
+			r.recorder.AnnotatedEventf(r.instance, annotations, "Warning", "Security", "Waiting for secret that contains the endpoint CA certificate: %v", err)
+			return ctrl.Result{RequeueAfter: time.Second * 10}, nil
+		}
+		if errors.Is(err, errEndpointCAMissing) {
+			r.logger.Error(err, "Skipping securityconfig reconciliation")
+			r.recorder.AnnotatedEventf(r.instance, annotations, "Warning", "Security", "%s", err.Error())
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
 	r.logger.Info("Starting securityconfig update job")
 	r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Security", "Starting securityconfig update job")
 
@@ -170,6 +186,7 @@ func (r *SecurityconfigReconciler) Reconcile() (ctrl.Result, error) {
 		namespace,
 		checksumval,
 		adminCertName,
+		endpointCASecretName,
 		cmdArg,
 		r.reconcilerContext.Volumes,
 		r.reconcilerContext.VolumeMounts,
@@ -287,4 +304,70 @@ func (r *SecurityconfigReconciler) securityconfigSubpaths(instance *opsterv1.Ope
 // BuildClusterSvcHostName builds the cluster host name as {svc-name}.{namespace}.svc.{dns-base}
 func BuildClusterSvcHostName(instance *opsterv1.OpenSearchCluster) string {
 	return fmt.Sprintf("%s.svc.%s", builders.DnsOfService(instance), helpers.ClusterDnsBase())
+}
+
+// determineEndpointCASecret returns the secret whose ca.crt securityadmin uses to
+// verify the OpenSearch endpoint: HTTP for OpenSearch 2.x, transport for earlier versions.
+func (r *SecurityconfigReconciler) determineEndpointCASecret() string {
+	tlsConfig := r.instance.Spec.Security.Tls
+	if tlsConfig == nil {
+		return ""
+	}
+	if helpers.SecurityChangeVersion(r.instance) {
+		return helpers.HTTPEndpointCACertSecretRef(r.instance.Name, tlsConfig.Http).Name
+	}
+	return helpers.TransportEndpointCACertSecretRef(r.instance.Name, tlsConfig.Transport).Name
+}
+
+func (r *SecurityconfigReconciler) warnEndpointCAFallback(endpointSecretName, fallbackName string, annotations map[string]string) {
+	r.logger.Info("Endpoint secret has no ca.crt, falling back", "secret", endpointSecretName, "fallback", fallbackName)
+	r.recorder.AnnotatedEventf(r.instance, annotations, "Warning", "Security",
+		"Secret '%s' has no %s, using '%s' to verify the endpoint; add %s to '%s' to silence this",
+		endpointSecretName, CaCertKey, fallbackName, CaCertKey, endpointSecretName)
+}
+
+var errEndpointCAMissing = errors.New("endpoint CA certificate not found")
+
+// resolveEndpointCASecret returns the name of the secret whose ca.crt securityadmin uses
+// to verify the OpenSearch endpoint. The endpoint certificate secret is preferred. If it
+// has no ca.crt (e.g. ACME issuers), it falls back to what securityadmin used before the
+// endpoint CA was introduced: the configured caSecret, then the admin secret itself.
+func (r *SecurityconfigReconciler) resolveEndpointCASecret(namespace, adminSecretName string, annotations map[string]string) (string, error) {
+	endpointSecretName := r.determineEndpointCASecret()
+	caSecretName := helpers.TlsCASecretRef(r.instance).Name
+
+	// 1. The endpoint certificate secret (the prefered source)
+	if endpointSecretName != "" {
+		secret, err := r.client.GetSecret(endpointSecretName, namespace)
+		if err != nil {
+			return "", err
+		} else if len(secret.Data[CaCertKey]) > 0 {
+			return endpointSecretName, nil
+		}
+	}
+
+	// first fallback alternative: the configured caSecret if present
+	if caSecretName != "" && caSecretName != endpointSecretName {
+		secret, err := r.client.GetSecret(caSecretName, namespace)
+		if err != nil {
+			return "", err
+		} else if len(secret.Data[CaCertKey]) > 0 {
+			r.warnEndpointCAFallback(endpointSecretName, caSecretName, annotations)
+			return caSecretName, nil
+		}
+	}
+
+	// second fallback alternative: the admin secret if present
+	if adminSecretName != "" && adminSecretName != endpointSecretName && adminSecretName != caSecretName {
+		secret, err := r.client.GetSecret(adminSecretName, namespace)
+		if err != nil {
+			return "", err
+		} else if len(secret.Data[CaCertKey]) > 0 {
+			r.warnEndpointCAFallback(endpointSecretName, adminSecretName, annotations)
+			return adminSecretName, nil
+		}
+	}
+
+	return "", fmt.Errorf("%w: secret '%s' (or, as fallback, caSecret '%s' or admin secret '%s') must contain a non-empty %s for securityadmin to verify the endpoint",
+		errEndpointCAMissing, endpointSecretName, caSecretName, adminSecretName, CaCertKey)
 }
