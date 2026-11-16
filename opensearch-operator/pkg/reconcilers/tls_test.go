@@ -7,6 +7,7 @@ import (
 	opsterv1 "github.com/Opster/opensearch-k8s-operator/opensearch-operator/api/v1"
 	"github.com/Opster/opensearch-k8s-operator/opensearch-operator/mocks/github.com/Opster/opensearch-k8s-operator/opensearch-operator/pkg/reconcilers/k8s"
 	"github.com/Opster/opensearch-k8s-operator/opensearch-operator/pkg/helpers"
+	"github.com/Opster/opensearch-k8s-operator/opensearch-operator/pkg/tls"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
@@ -74,6 +75,58 @@ var _ = Describe("TLS Controller", func() {
 			value, exists = reconcilerContext.OpenSearchConfig["plugins.security.authcz.admin_dn"]
 			Expect(exists).To(BeTrue())
 			Expect(value).To(Equal("[\"CN=admin,OU=tls-test\"]"))
+		})
+	})
+
+	// CRITEO
+	Context("When the global transport certificate already exists", func() {
+		clusterName := "tls-renewal"
+		caSecretName := clusterName + "-ca"
+		transportSecretName := clusterName + "-transport-cert"
+
+		setup := func(deadlineDays int) (*k8s.MockK8sClient, *TLSReconciler) {
+			spec := opsterv1.OpenSearchCluster{
+				ObjectMeta: metav1.ObjectMeta{Name: clusterName, Namespace: clusterName, UID: "dummyuid"},
+				Spec: opsterv1.ClusterSpec{
+					General: opsterv1.GeneralConfig{},
+					Security: &opsterv1.Security{Tls: &opsterv1.TlsConfig{
+						Transport: &opsterv1.TlsConfigTransport{Generate: true},
+					}},
+				},
+			}
+			// CRITEO: do not mock PKI for transport cert renewal test (the renewal logic validates expiry and
+			// signature of a real certificate). Could consider modifying newTLSReconciler instead, as tests already
+			// in upstream pass with the real pki module too.
+			pki := tls.NewPKI()
+			ca, err := pki.GenerateCA(clusterName)
+			Expect(err).ToNot(HaveOccurred())
+			nodeCert, err := ca.CreateAndSignCertificate(clusterName, clusterName, nil)
+			Expect(err).ToNot(HaveOccurred())
+
+			mockClient := k8s.NewMockK8sClient(GinkgoT())
+			mockClient.EXPECT().Context().Return(context.Background()).Maybe()
+			mockClient.EXPECT().Scheme().Return(scheme.Scheme).Maybe()
+			mockClient.EXPECT().GetSecret(caSecretName, clusterName).Return(corev1.Secret{Data: ca.SecretDataCA()}, nil)
+			mockClient.EXPECT().GetSecret(transportSecretName, clusterName).Return(corev1.Secret{Data: nodeCert.SecretData(ca)}, nil)
+
+			_, underTest := newTLSReconciler(mockClient, &spec)
+			underTest.pki = pki
+			underTest.transportCertDeadlineDays = deadlineDays
+			return mockClient, underTest
+		}
+
+		It("should keep it when it is not close to expiration", func() {
+			// No CreateSecret expectation: an unexpected call fails the test.
+			_, underTest := setup(30)
+			Expect(underTest.handleTransportGenerateGlobal()).To(Succeed())
+		})
+
+		It("should regenerate it when it expires within the deadline", func() {
+			mockClient, underTest := setup(730)
+			mockClient.On("CreateSecret", mock.MatchedBy(func(secret *corev1.Secret) bool {
+				return secret.ObjectMeta.Name == transportSecretName
+			})).Return(&ctrl.Result{}, nil).Once()
+			Expect(underTest.handleTransportGenerateGlobal()).To(Succeed())
 		})
 	})
 
