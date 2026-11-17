@@ -67,6 +67,16 @@ func NewUpgradeReconciler(
 func (r *UpgradeReconciler) Reconcile() (ctrl.Result, error) {
 	// If versions are in sync do nothing
 	if r.instance.Spec.General.Version == r.instance.Status.Version {
+		// START backport #1473 (upstream v3.0.0)
+		// Always clear leftover Upgrader bookkeeping so an aborted/reverted upgrade cannot skip
+		// pools on the next upgrade (upstream issue #1453).
+		if r.hasUpgraderStatuses() {
+			err := r.client.UpdateOpenSearchClusterStatus(client.ObjectKeyFromObject(r.instance), func(instance *opsterv1.OpenSearchCluster) {
+				instance.Status.ComponentsStatus = helpers.ClearUpgraderComponentStatuses(instance.Status.ComponentsStatus)
+			})
+			return ctrl.Result{}, err
+		}
+		// END backport #1473
 		return ctrl.Result{}, nil
 	}
 
@@ -103,7 +113,10 @@ func (r *UpgradeReconciler) Reconcile() (ctrl.Result, error) {
 		// Set it to upgrading and requeue
 		err := r.client.UpdateOpenSearchClusterStatus(client.ObjectKeyFromObject(r.instance), func(instance *opsterv1.OpenSearchCluster) {
 			currentStatus.Status = upgradeStatusInProgress
-			instance.Status.ComponentsStatus = append(instance.Status.ComponentsStatus, currentStatus)
+			// START backport #1551 (upstream v3.0.0)
+			// Identity-keyed Replace avoids duplicating an already-written Upgrading entry (upstream #1534).
+			instance.Status.ComponentsStatus = helpers.Replace(currentStatus, currentStatus, instance.Status.ComponentsStatus)
+			// END backport #1551
 		})
 		r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Upgrade", "Starting upgrade of node pool '%s'", currentStatus.Description)
 		return ctrl.Result{
@@ -120,16 +133,9 @@ func (r *UpgradeReconciler) Reconcile() (ctrl.Result, error) {
 		// Cleanup status after successful upgrade
 		err := r.client.UpdateOpenSearchClusterStatus(client.ObjectKeyFromObject(r.instance), func(instance *opsterv1.OpenSearchCluster) {
 			instance.Status.Version = instance.Spec.General.Version
-			for _, pool := range instance.Spec.NodePools {
-				componentStatus := opsterv1.ComponentStatus{
-					Component:   componentNameUpgrader,
-					Description: pool.Component,
-				}
-				currentStatus, found := helpers.FindFirstPartial(instance.Status.ComponentsStatus, componentStatus, helpers.GetByDescriptionAndComponent)
-				if found {
-					instance.Status.ComponentsStatus = helpers.RemoveIt(currentStatus, instance.Status.ComponentsStatus)
-				}
-			}
+			// START backport #1473 (upstream v3.0.0)
+			instance.Status.ComponentsStatus = helpers.ClearUpgraderComponentStatuses(instance.Status.ComponentsStatus)
+			// END backport #1473
 		})
 		r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "Upgrade", "Finished upgrade - NewVersion: %s", r.instance.Spec.General.Version)
 		return ctrl.Result{}, err
@@ -138,6 +144,18 @@ func (r *UpgradeReconciler) Reconcile() (ctrl.Result, error) {
 		return ctrl.Result{}, ErrUnexpectedStatus
 	}
 }
+
+// START backport #1473 (upstream v3.0.0)
+func (r *UpgradeReconciler) hasUpgraderStatuses() bool {
+	for _, status := range r.instance.Status.ComponentsStatus {
+		if status.Component == componentNameUpgrader {
+			return true
+		}
+	}
+	return false
+}
+
+// END backport #1473
 
 // Currently provides basic validation on versions.
 // TODO Improve the validation (maybe allow patch version downgrades)
